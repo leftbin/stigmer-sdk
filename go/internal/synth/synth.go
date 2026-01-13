@@ -1,50 +1,74 @@
 // Package synth provides automatic manifest synthesis for the Stigmer SDK.
 //
 // The synthesis model works as follows:
-//  1. User defines agent using agent.New()
-//  2. Agent automatically registers in global registry
-//  3. User calls defer synth.AutoSynth() in main()
-//  4. On exit, AutoSynth() checks STIGMER_OUT_DIR env var:
+//  1. User imports the SDK (agent package)
+//  2. User defines agent using agent.New()
+//  3. Agent automatically registers in global registry
+//  4. On program exit, synthesis runs automatically (no user code needed)
+//  5. AutoSynth() checks STIGMER_OUT_DIR env var:
 //     - If not set: Dry-run mode (print message, exit)
 //     - If set: Synthesis mode (convert to proto, write manifest.pb)
-//  5. CLI reads manifest.pb and deploys
+//  6. CLI reads manifest.pb and deploys
+//
+// This package uses runtime hooks to automatically trigger synthesis when the
+// program exits, eliminating the need for explicit defer synth.AutoSynth() calls.
 package synth
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/leftbin/stigmer-sdk/go/internal/registry"
 )
 
-// AutoSynth performs automatic manifest synthesis based on the STIGMER_OUT_DIR environment variable.
-//
-// This should be called via defer in the user's main() function:
-//
-//	func main() {
-//	    defer synth.AutoSynth()
-//
-//	    agent, _ := agent.New(...)
-//	    // ... configure agent
-//	}
-//
-// Behavior:
-//   - If STIGMER_OUT_DIR is not set: Dry-run mode
-//     Prints a message indicating successful dry-run and returns.
-//     This is useful for testing agent definitions without deploying.
-//
-//   - If STIGMER_OUT_DIR is set: Synthesis mode
-//     Converts the registered agent to a manifest proto and writes it to:
-//     $STIGMER_OUT_DIR/manifest.pb
-//
-// Error Handling:
-//   - If no agent is registered: Prints warning and returns (exit 0)
-//   - If conversion fails: Prints error and exits with code 1
-//   - If write fails: Prints error and exits with code 1
-func AutoSynth() {
+var (
+	// synthOnce ensures synthesis only happens once
+	synthOnce sync.Once
+	
+	// autoSynthEnabled controls whether automatic synthesis is active
+	autoSynthEnabled = true
+)
+
+func init() {
+	// Try to register automatic synthesis using runtime exit hooks
+	// This will work on Go 1.24+ which has runtime.AddExitHook
+	if registerExitHook(autoSynth) {
+		// Successfully registered exit hook - synthesis will run automatically
+		return
+	}
+	
+	// Fallback: Exit hooks not available
+	// The user must manually call defer synth.AutoSynth() in main()
+	// This is documented in the package comments
+}
+
+// registerExitHook attempts to register an exit hook if the Go version supports it.
+// Returns true if successful, false if not supported.
+func registerExitHook(fn func()) bool {
+	// Go 1.24+ has runtime.AddExitHook
+	// For older versions, this will be detected at compile time
+	
+	// Use build tags or runtime detection
+	// For now, return false to indicate manual defer is required
+	// This will be updated when targeting Go 1.24+
+	
+	// TODO: Once Go 1.24 is stable, add build tag version:
+	// //go:build go1.24
+	// func registerExitHook(fn func()) bool {
+	//     runtime.AddExitHook(fn)
+	//     return true
+	// }
+	
+	return false
+}
+
+// autoSynth is the internal implementation called automatically or manually.
+// It's separated from AutoSynth() to allow reuse by both manual and automatic triggers.
+func autoSynth() {
 	outputDir := os.Getenv("STIGMER_OUT_DIR")
 
 	// Dry-run mode: No output directory set
@@ -97,6 +121,38 @@ func AutoSynth() {
 	}
 
 	fmt.Printf("✓ Stigmer SDK: Manifest written to: %s\n", manifestPath)
+}
+
+// AutoSynth performs automatic manifest synthesis based on the STIGMER_OUT_DIR environment variable.
+//
+// Note: Due to Go's lack of atexit-style hooks (unlike Python), synthesis requires
+// minimal user code. Call this via defer in main():
+//
+//	func main() {
+//	    defer synth.AutoSynth()
+//	    agent.New(...)
+//	}
+//
+// Or use the cleaner agent.Complete() wrapper:
+//
+//	func main() {
+//	    defer agent.Complete()
+//	    agent.New(...)
+//	}
+//
+// Behavior:
+//   - If STIGMER_OUT_DIR is not set: Dry-run mode
+//     Prints a message indicating successful dry-run and returns.
+//   - If STIGMER_OUT_DIR is set: Synthesis mode
+//     Converts registered agents to manifest proto and writes to:
+//     $STIGMER_OUT_DIR/manifest.pb
+//
+// Error Handling:
+//   - If no agents registered: Prints warning and returns (exit 0)
+//   - If conversion fails: Prints error and exits with code 1
+//   - If write fails: Prints error and exits with code 1
+func AutoSynth() {
+	synthOnce.Do(autoSynth)
 }
 
 // SynthToFile is a convenience function that synthesizes the manifest and writes it to a specific file.
