@@ -248,7 +248,7 @@ Platform (Stigmer API)
 - ✅ CLI handles all proto conversion and deployment
 - ✅ SDK and proto can evolve independently
 
-See [PROTO_MAPPING.md](PROTO_MAPPING.md) for how CLI converts SDK types to proto messages.
+See [docs/references/proto-mapping.md](docs/references/proto-mapping.md) for how CLI converts SDK types to proto messages.
 
 ## Validation
 
@@ -317,7 +317,7 @@ Full API documentation is available on [pkg.go.dev](https://pkg.go.dev/github.co
 
 ## Migration from Python SDK
 
-If you're migrating from the Python SDK, see [MIGRATION.md](MIGRATION.md) for a side-by-side comparison and translation guide.
+If you're migrating from the Python SDK, see [docs/guides/migration-guide.md](docs/guides/migration-guide.md) for a side-by-side comparison and translation guide.
 
 ## Project Structure
 
@@ -366,6 +366,8 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 ## Related Documentation
 
 - **Multi-language SDK Overview**: [Main README](../README.md)
-- **Migration Guide**: [MIGRATION.md](MIGRATION.md) - Migrating from proto-coupled design
-- **Proto Mapping**: [PROTO_MAPPING.md](PROTO_MAPPING.md) - CLI conversion reference
+- **Complete Go SDK Documentation**: [docs/README.md](docs/README.md) - Full documentation index
+- **Migration Guide**: [docs/guides/migration-guide.md](docs/guides/migration-guide.md) - Migrating from proto-coupled design
+- **Proto Mapping**: [docs/references/proto-mapping.md](docs/references/proto-mapping.md) - CLI conversion reference
+- **Buf Dependency Guide**: [docs/guides/buf-dependency-guide.md](docs/guides/buf-dependency-guide.md) - Using Buf Schema Registry
 - **Contributing**: [../CONTRIBUTING.md](../CONTRIBUTING.md)
