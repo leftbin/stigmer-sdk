@@ -17,8 +17,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	// Use local proto stubs temporarily
-	agentv1 "github.com/leftbin/stigmer/apis/stubs/go/github.com/leftbin/stigmer/apis/stubs/go/ai/stigmer/agentic/agent/v1"
-	sdk "github.com/leftbin/stigmer/apis/stubs/go/github.com/leftbin/stigmer/apis/stubs/go/ai/stigmer/commons/sdk"
+	agentv1 "buf.build/gen/go/leftbin/stigmer/protocolbuffers/go/ai/stigmer/agentic/agent/v1"
+	sdk "buf.build/gen/go/leftbin/stigmer/protocolbuffers/go/ai/stigmer/commons/sdk"
 
 	"github.com/leftbin/stigmer-sdk/go/agent"
 	"github.com/leftbin/stigmer-sdk/go/internal/registry"

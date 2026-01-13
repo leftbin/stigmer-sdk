@@ -1,8 +1,6 @@
 module github.com/leftbin/stigmer-sdk/go
 
-go 1.24.3
-
-toolchain go1.24.11
+go 1.25.0
 
 require (
 	buf.build/gen/go/leftbin/stigmer/protocolbuffers/go v1.36.11-20260113100504-8218a0bea17c.1
