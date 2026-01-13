@@ -78,4 +78,32 @@ examples: ## Run all examples
 	done
 	@echo "All examples completed!"
 
+.PHONY: update-deps
+update-deps: ## Update buf proto dependencies to latest
+	@echo "Updating buf proto dependencies..."
+	@go get -u buf.build/gen/go/leftbin/stigmer/protocolbuffers/go
+	@go get -u buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go
+	@go mod tidy
+	@echo "✓ Dependencies updated successfully!"
+	@echo ""
+	@echo "Updated versions:"
+	@grep "buf.build/gen/go" go.mod
+
+.PHONY: release
+release: ## Create and push a release tag (usage: make release TAG=v0.1.3)
+ifndef TAG
+	@echo "ERROR: TAG is required. Usage: make release TAG=v0.1.3"
+	@exit 1
+endif
+	@echo "Creating release tag: $(TAG)"
+	@if git rev-parse "$(TAG)" >/dev/null 2>&1; then \
+		echo "ERROR: Tag $(TAG) already exists"; \
+		exit 1; \
+	fi
+	@git tag -a "$(TAG)" -m "Release $(TAG)"
+	@git push origin "$(TAG)"
+	@echo "✓ Release tag $(TAG) created and pushed successfully!"
+	@echo ""
+	@echo "View release: https://github.com/leftbin/stigmer-sdk/releases/tag/$(TAG)"
+
 .DEFAULT_GOAL := help
