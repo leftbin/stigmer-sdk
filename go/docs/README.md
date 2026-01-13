@@ -8,8 +8,9 @@ Complete documentation for the Stigmer Go SDK.
 
 ## Architecture
 
+- [Synthesis Model](./architecture/synthesis-model.md) - Why `defer stigmeragent.Complete()` is required and Go's limitations
 - [Synthesis Architecture](./architecture/synthesis-architecture.md) - Auto-synthesis model with defer pattern and manifest.pb generation
-- [Multi-Agent Support](./architecture/multi-agent-support.md) - ✅ NEW: Multiple agents in one file - implementation complete
+- [Multi-Agent Support](./architecture/multi-agent-support.md) - Multiple agents in one file - implementation complete
 - [Synthesis Behavior and Limitations](./architecture/synthesis-behavior-and-limitations.md) - How synthesis works, testing, and CLI session isolation
 
 ## Guides
@@ -17,6 +18,10 @@ Complete documentation for the Stigmer Go SDK.
 ### Getting Started
 - [Migration Guide](./guides/migration-guide.md) - Migrating from proto-coupled to proto-agnostic design
 - [Buf Dependency Guide](./guides/buf-dependency-guide.md) - Using Buf Schema Registry dependencies
+
+## Implementation
+
+- [Synthesis API Improvement](./implementation/synthesis-api-improvement.md) - Evolution from `synth.AutoSynth()` to `stigmeragent.Complete()`
 
 ## References
 

@@ -3,7 +3,7 @@
 //
 // This example demonstrates:
 // 1. Loading agent instructions and skill content from external files
-// 2. Auto-synthesis pattern using defer synth.AutoSynth()
+// 2. Auto-synthesis pattern using defer agent.Complete()
 //
 // Benefits of loading from files:
 // 1. Better organization - keep large instructions separate from code
@@ -14,7 +14,7 @@
 //
 // Synthesis Model:
 // - SDK collects agent configuration in memory
-// - On program exit, defer synth.AutoSynth() writes manifest.pb
+// - On program exit, defer agent.Complete() writes manifest.pb
 // - CLI reads manifest.pb and deploys to platform
 //
 // Directory structure:
@@ -37,18 +37,17 @@ import (
 	"log"
 
 	"github.com/leftbin/stigmer-sdk/go/agent"
-	"github.com/leftbin/stigmer-sdk/go/internal/synth"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
 	"github.com/leftbin/stigmer-sdk/go/subagent"
 )
 
 func main() {
-	// IMPORTANT: Register auto-synth to run on exit
-	// This enables the synthesis model where manifest.pb is automatically written
+	// IMPORTANT: Complete() enables synthesis and runs on exit
+	// This is the synthesis model where manifest.pb is automatically written
 	// - If STIGMER_OUT_DIR is not set: Dry-run mode (prints success message)
 	// - If STIGMER_OUT_DIR is set: Synthesis mode (writes manifest.pb to that directory)
-	defer synth.AutoSynth()
+	defer agent.Complete()
 
 	fmt.Println("=== Example 06: Agent with Instructions from Files + Synthesis ===\n")
 

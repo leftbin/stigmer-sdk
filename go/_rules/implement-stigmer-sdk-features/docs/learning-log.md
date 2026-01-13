@@ -656,6 +656,346 @@ if err != nil {
 
 ---
 
+## API Design & Package Organization
+
+**Topic Coverage**: Import cycles, package structure, root package patterns, cross-cutting concerns
+
+### 2026-01-13 - Avoiding Import Cycles with Root Package Pattern
+
+**Problem**: Attempted to add `Complete()` synthesis function to `agent` package, but created an import cycle: `agent` → `synth` (for Complete()) and `synth` → `agent` (for type conversion).
+
+**Root Cause**:
+- `agent` package needs to call synthesis logic (`synth`)
+- `synth` package needs to convert agent types to proto
+- This creates a circular dependency that Go doesn't allow
+- Compilation error: "import cycle not allowed"
+
+**Solution**: Move `Complete()` to root package to break the cycle
+
+**Implementation in Go**:
+
+```go
+// ❌ BEFORE: Import cycle
+// agent/agent.go
+package agent
+
+import "github.com/leftbin/stigmer-sdk/go/internal/synth"
+
+func Complete() {
+    synth.AutoSynth()  // agent → synth
+}
+
+// internal/synth/converter.go
+package synth
+
+import "github.com/leftbin/stigmer-sdk/go/agent"
+
+func ToManifest(a *agent.Agent) {...}  // synth → agent
+// CYCLE: agent → synth → agent
+
+// ✅ AFTER: Root package breaks cycle
+// synthesis.go (root package)
+package stigmeragent
+
+import "github.com/leftbin/stigmer-sdk/go/internal/synth"
+
+func Complete() {
+    synth.AutoSynth()  // root → synth (no cycle)
+}
+
+// internal/synth/converter.go
+package synth
+
+import "github.com/leftbin/stigmer-sdk/go/agent"
+
+func ToManifest(a *agent.Agent) {...}  // synth → agent
+// NO CYCLE: root → synth, synth → agent, no agent → root
+```
+
+**Package Dependency Graph**:
+
+```
+Before (CYCLE):
+┌──────┐
+│agent │ ──→ synth ──→ agent (CYCLE!)
+└──────┘       ↑____________│
+
+After (NO CYCLE):
+┌──────┐
+│ root │ ──→ synth ──→ agent
+└──────┘
+   ↑                    │
+   └─────── user ───────┘
+```
+
+**Root Package Pattern**:
+- Use root package for **cross-cutting concerns**
+- Functions that need to coordinate between packages
+- Break import cycles by being "above" all subpackages
+- Examples: `Complete()` for synthesis, `Version()` for SDK info
+
+**Usage Pattern**:
+
+```go
+import stigmeragent "github.com/leftbin/stigmer-sdk/go"  // Root
+import "github.com/leftbin/stigmer-sdk/go/agent"         // Subpackage
+
+func main() {
+    defer stigmeragent.Complete()  // Root package function
+    
+    agent.New(...)  // Subpackage function
+}
+```
+
+**Benefits**:
+- No import cycles
+- Clear separation: root = coordination, subpackages = domain
+- Users import two packages (predictable pattern)
+- Extensible for other cross-cutting concerns
+
+**Prevention**: 
+- When adding functions that coordinate between packages, use root package
+- Check for cycles: if package A needs package B, and B needs A, use root
+- Root package is for SDK-wide operations, not domain logic
+- Keep subpackages focused on their domain (agent, skill, etc.)
+
+**Go Import Cycle Detection**:
+```bash
+# Check for import cycles
+go build ./...
+# Error will show: "import cycle not allowed in test"
+```
+
+---
+
+### 2026-01-13 - Go Language Constraints: No atexit Hooks
+
+**Problem**: User questioned why Go SDK requires `defer stigmeragent.Complete()` when the original design envisioned zero-boilerplate synthesis (like Python's `atexit` hooks).
+
+**Root Cause**:
+- **Python has `atexit.register()`** - automatically runs functions on exit
+- **TypeScript has `process.on('exit')`** - event-based exit hooks
+- **Go has no built-in exit hooks** (until Go 1.24+ with `runtime.AddExitHook`)
+- Original design document assumed all languages would have this capability
+
+**Why Go is Different**:
+
+| Language | Exit Hook | Automatic Synthesis? |
+|---|---|---|
+| Python | `atexit.register(_auto_synth)` | ✅ Yes |
+| TypeScript | `process.on('exit', ...)` | ✅ Yes |
+| Go < 1.24 | None | ❌ No |
+| Go 1.24+ | `runtime.AddExitHook(...)` | ⚠️ Version-specific |
+
+**Attempted Alternatives** (all failed):
+
+1. **Finalizers** (`runtime.SetFinalizer`):
+   - Only runs during garbage collection, not program exit
+   - Timing is unpredictable
+   - Not guaranteed to run at all
+
+2. **Signal Handlers** (`signal.Notify`):
+   - Only catches SIGINT/SIGTERM
+   - Doesn't catch normal `os.Exit(0)` or end of `main()`
+   - Doesn't work for `go run` termination
+
+3. **Background Goroutine**:
+   - Can't detect when `main()` completes
+   - Would need channels/sync, adding complexity
+   - Still requires user code to signal completion
+
+4. **Go 1.24+ `runtime.AddExitHook`**:
+   - Only available in Go 1.24+ (released Q1 2025)
+   - Can't use as default until Go 1.26+ is mainstream (~2027)
+   - Would require build tags and version-specific code
+
+**Solution**: Accept Go's limitation and provide cleanest possible API
+
+**Implementation in Go**:
+
+```go
+// Best possible API given Go's constraints
+import stigmeragent "github.com/leftbin/stigmer-sdk/go"
+
+func main() {
+    defer stigmeragent.Complete()  // ONE line of boilerplate
+    
+    agent.New(...)  // Rest is clean
+}
+```
+
+**Why This is Best Possible**:
+- ✅ **One line** - minimal overhead (5 words)
+- ✅ **Clear intent** - `Complete()` is self-documenting
+- ✅ **Go idiom** - `defer` is standard pattern
+- ✅ **Works everywhere** - no version constraints
+- ✅ **Predictable** - explicit control flow
+
+**Alternative (without defer) would be much worse**:
+
+```go
+// ❌ Without Complete() - manual boilerplate (20+ lines)
+func main() {
+    agent, _ := agent.New(...)
+    
+    // User would have to:
+    manifest := synth.ToManifest(agent)
+    data, _ := proto.Marshal(manifest)
+    outputDir := os.Getenv("STIGMER_OUT_DIR")
+    if outputDir == "" {
+        fmt.Println("Dry-run mode...")
+        return
+    }
+    os.MkdirAll(outputDir, 0755)
+    os.WriteFile(filepath.Join(outputDir, "manifest.pb"), data, 0644)
+}
+```
+
+**Documentation Strategy**:
+Created comprehensive documentation explaining this:
+- `docs/architecture/synthesis-model.md` (200+ lines)
+- Explains Go's language constraints vs Python
+- Documents all attempted alternatives
+- Justifies why `defer` is necessary
+- Shows future path (Go 1.24+)
+
+**Benefits**:
+- Users understand WHY (not just HOW)
+- No confusion about missing features
+- Clear path forward (Go 1.24+ support)
+- Manages expectations appropriately
+
+**Future: Go 1.24+ Support**:
+
+```go
+//go:build go1.24
+
+package stigmeragent
+
+import "runtime"
+
+func init() {
+    // Truly automatic - no defer needed!
+    runtime.AddExitHook(synth.AutoSynth)
+}
+```
+
+Then users on Go 1.24+ can skip the `defer` line entirely.
+
+**Prevention**: 
+- Document language constraints prominently
+- Don't promise features that require language capabilities not present
+- Explain trade-offs clearly in architecture docs
+- Plan for future language versions when capabilities arrive
+- Accept that different languages have different limitations
+
+**Cross-Language Design Lesson**:
+When designing multi-language SDKs, recognize that not all languages have the same capabilities. The "ideal" design in one language may be impossible in another. Document these constraints clearly so users understand the reasoning.
+
+---
+
+## Documentation Organization
+
+**Topic Coverage**: Documentation standards, filename conventions, categorization, navigation
+
+### 2026-01-13 - Following Stigmer Documentation Standards
+
+**Problem**: Created documentation with uppercase filenames (`SYNTHESIS.md`) in wrong locations (root of package instead of `docs/`), not following Stigmer monorepo conventions.
+
+**Root Cause**:
+- Didn't check Stigmer documentation standards before creating files
+- Default to uppercase for "important" docs (common anti-pattern)
+- Placed architectural docs in root instead of categorized location
+- Temporary files left in `_cursor/` folder (won't be committed)
+
+**Stigmer Documentation Standards**:
+
+1. **All filenames lowercase with hyphens**:
+   - ✅ `synthesis-model.md`
+   - ❌ `SYNTHESIS.md`
+   - ❌ `SynthesisModel.md`
+   - ❌ `synthesis_model.md`
+
+2. **Organized by purpose in `docs/` folder**:
+   ```
+   docs/
+   ├── README.md                    # Documentation index
+   ├── getting-started/             # Quick starts, configuration
+   ├── architecture/                # System design, patterns
+   ├── guides/                      # How-to guides, tutorials
+   ├── implementation/              # Implementation details, reports
+   └── references/                  # Additional references, notes
+   ```
+
+3. **Update `docs/README.md` index** when adding new docs
+
+4. **Never use `_cursor/` for permanent documentation** - it's temporary
+
+**Solution**: Reorganize all documentation to follow standards
+
+**Implementation**:
+
+```bash
+# ❌ BEFORE: Non-compliant
+go/
+├── SYNTHESIS.md                            # Uppercase, wrong location
+└── _cursor/
+    ├── synthesis-api-improvement.md        # Won't be committed
+    └── implementation-summary.md           # Won't be committed
+
+# ✅ AFTER: Standards compliant
+go/
+└── docs/
+    ├── README.md                           # Updated index
+    ├── architecture/
+    │   └── synthesis-model.md              # Lowercase, categorized
+    └── implementation/
+        └── synthesis-api-improvement.md    # Lowercase, categorized
+```
+
+**Categorization Guidelines**:
+
+| Content Type | Category | Example |
+|---|---|---|
+| **Why it exists** | `architecture/` | `synthesis-model.md` |
+| **What was built** | `implementation/` | `synthesis-api-improvement.md` |
+| **How to use** | `guides/` | `getting-started.md` |
+| **Quick reference** | `references/` | `proto-mapping.md` |
+
+**Documentation Index Pattern**:
+
+```markdown
+## Architecture
+
+- [Synthesis Model](./architecture/synthesis-model.md) - Why Go needs defer
+- [Multi-Agent Support](./architecture/multi-agent-support.md) - Multiple agents
+```
+
+**Benefits**:
+- Consistent across all Stigmer projects
+- Easy to find documentation (clear categories)
+- Professional open-source conventions
+- Scales well as docs grow
+- Platform-independent (works everywhere)
+
+**Prevention**: 
+- **Always check** `@documentation-standards.md` before creating docs
+- Use lowercase-with-hyphens for ALL filenames
+- Categorize by purpose (architecture, implementation, guides, references)
+- Update `docs/README.md` index immediately
+- Never commit files from `_cursor/` - they're temporary
+
+**Automation**:
+Could create a pre-commit hook to enforce:
+```bash
+# Check for uppercase in docs/
+find docs/ -name '*[A-Z]*' -type f
+```
+
+**Cross-Project Reference**: All Stigmer projects follow same standards
+
+---
+
 ## Go Module Management
 
 **Topic Coverage**: go.mod, dependency updates, version constraints
