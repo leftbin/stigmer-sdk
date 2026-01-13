@@ -277,9 +277,9 @@ func TestServerType_String(t *testing.T) {
 		serverType ServerType
 		expected   string
 	}{
-		{ServerTypeStdio, "stdio"},
-		{ServerTypeHTTP, "http"},
-		{ServerTypeDocker, "docker"},
+		{TypeStdio, "stdio"},
+		{TypeHTTP, "http"},
+		{TypeDocker, "docker"},
 		{ServerType(999), "unknown"},
 	}
 

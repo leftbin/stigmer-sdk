@@ -10,6 +10,9 @@ type MCPServer interface {
 	// Empty slice means all tools are enabled.
 	EnabledTools() []string
 
+	// Type returns the server type (stdio, http, or docker).
+	Type() ServerType
+
 	// Validate checks if the server configuration is valid.
 	Validate() error
 }
@@ -18,24 +21,24 @@ type MCPServer interface {
 type ServerType int
 
 const (
-	// ServerTypeStdio is a subprocess-based server with stdin/stdout communication.
-	ServerTypeStdio ServerType = iota
+	// TypeStdio is a subprocess-based server with stdin/stdout communication.
+	TypeStdio ServerType = iota
 
-	// ServerTypeHTTP is an HTTP + SSE based server.
-	ServerTypeHTTP
+	// TypeHTTP is an HTTP + SSE based server.
+	TypeHTTP
 
-	// ServerTypeDocker is a containerized server.
-	ServerTypeDocker
+	// TypeDocker is a containerized server.
+	TypeDocker
 )
 
 // String returns the string representation of the server type.
 func (st ServerType) String() string {
 	switch st {
-	case ServerTypeStdio:
+	case TypeStdio:
 		return "stdio"
-	case ServerTypeHTTP:
+	case TypeHTTP:
 		return "http"
-	case ServerTypeDocker:
+	case TypeDocker:
 		return "docker"
 	default:
 		return "unknown"

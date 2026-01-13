@@ -198,6 +198,37 @@ func (s Skill) IsOrganizationReference() bool {
 	return !s.IsInline && s.Org != ""
 }
 
+// IsRepositoryReference is an alias for IsOrganizationReference for consistency across SDK languages.
+func (s Skill) IsRepositoryReference() bool {
+	return s.IsOrganizationReference()
+}
+
+// NameOrSlug returns the skill identifier.
+// For inline skills, returns the Name field.
+// For referenced skills, returns the Slug field.
+func (s Skill) NameOrSlug() string {
+	if s.IsInline {
+		return s.Name
+	}
+	return s.Slug
+}
+
+// Repository returns the repository/organization name for repository-scoped skills.
+// For platform skills, returns empty string.
+func (s Skill) Repository() string {
+	return s.Org
+}
+
+// GetDescription returns the skill description (for inline skills).
+func (s Skill) GetDescription() string {
+	return s.Description
+}
+
+// Markdown returns the markdown content (for inline skills).
+func (s Skill) Markdown() string {
+	return s.MarkdownContent
+}
+
 // String returns a string representation of the Skill.
 func (s Skill) String() string {
 	if s.IsInline {

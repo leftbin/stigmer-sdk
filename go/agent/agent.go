@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/leftbin/stigmer-sdk/go/environment"
+	"github.com/leftbin/stigmer-sdk/go/internal/registry"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
 	"github.com/leftbin/stigmer-sdk/go/subagent"
@@ -55,6 +56,10 @@ type Option func(*Agent) error
 
 // New creates a new Agent with the given options.
 //
+// The agent is automatically registered in the global registry for synthesis.
+// When the program exits and defer synth.AutoSynth() is called, this agent
+// will be converted to a manifest proto and written to disk.
+//
 // Required options:
 //   - WithName: agent name
 //   - WithInstructions: behavior instructions
@@ -83,6 +88,11 @@ func New(opts ...Option) (*Agent, error) {
 	if err := validate(a); err != nil {
 		return nil, err
 	}
+
+	// Register in global registry for synthesis
+	// This enables the "synthesis model" where the SDK automatically
+	// writes manifest.pb when the program exits (via defer synth.AutoSynth())
+	registry.Global().RegisterAgent(a)
 
 	return a, nil
 }

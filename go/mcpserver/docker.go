@@ -96,6 +96,11 @@ func (d *DockerServer) ContainerName() string {
 	return d.containerName
 }
 
+// Type returns the server type (docker).
+func (d *DockerServer) Type() ServerType {
+	return TypeDocker
+}
+
 // Validate checks if the Docker server configuration is valid.
 func (d *DockerServer) Validate() error {
 	if d.name == "" {

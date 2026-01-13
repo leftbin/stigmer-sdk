@@ -181,6 +181,47 @@ func (s SubAgent) Name() string {
 	return s.name
 }
 
+// Instructions returns the behavior instructions for inline sub-agents.
+func (s SubAgent) Instructions() string {
+	return s.instructions
+}
+
+// Description returns the description for inline sub-agents.
+func (s SubAgent) Description() string {
+	return s.description
+}
+
+// MCPServerNames returns the list of MCP server names for inline sub-agents.
+func (s SubAgent) MCPServerNames() []string {
+	return s.mcpServers
+}
+
+// ToolSelections returns the MCP tool selections map for inline sub-agents.
+func (s SubAgent) ToolSelections() map[string][]string {
+	return s.mcpToolSelections
+}
+
+// Skills returns the skill references for inline sub-agents.
+func (s SubAgent) Skills() []skill.Skill {
+	return s.skillRefs
+}
+
+// Organization returns the organization for referenced sub-agents.
+// For inline sub-agents, returns empty string.
+func (s SubAgent) Organization() string {
+	if s.IsReference() {
+		// For references, we need to parse from agentInstanceRef
+		// For now, return empty - this will be handled by CLI
+		return ""
+	}
+	return ""
+}
+
+// AgentInstanceID returns the agent instance reference for referenced sub-agents.
+func (s SubAgent) AgentInstanceID() string {
+	return s.agentInstanceRef
+}
+
 // Validate checks if the sub-agent configuration is valid.
 func (s SubAgent) Validate() error {
 	if s.IsInline() {

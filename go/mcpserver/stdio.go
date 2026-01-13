@@ -73,6 +73,11 @@ func (s *StdioServer) WorkingDir() string {
 	return s.workingDir
 }
 
+// Type returns the server type (stdio).
+func (s *StdioServer) Type() ServerType {
+	return TypeStdio
+}
+
 // Validate checks if the stdio server configuration is valid.
 func (s *StdioServer) Validate() error {
 	if s.name == "" {

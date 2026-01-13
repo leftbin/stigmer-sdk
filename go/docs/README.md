@@ -6,6 +6,12 @@ Complete documentation for the Stigmer Go SDK.
 
 - **Main README**: [../README.md](../README.md) - Go SDK overview and quick start
 
+## Architecture
+
+- [Synthesis Architecture](./architecture/synthesis-architecture.md) - Auto-synthesis model with defer pattern and manifest.pb generation
+- [Multi-Agent Support](./architecture/multi-agent-support.md) - ✅ NEW: Multiple agents in one file - implementation complete
+- [Synthesis Behavior and Limitations](./architecture/synthesis-behavior-and-limitations.md) - How synthesis works, testing, and CLI session isolation
+
 ## Guides
 
 ### Getting Started
