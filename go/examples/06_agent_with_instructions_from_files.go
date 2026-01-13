@@ -1,8 +1,9 @@
 //go:build ignore
-// Example 06: Agent with Instructions from Files
+// Example 06: Agent with Instructions from Files + Synthesis
 //
-// This example demonstrates the recommended pattern of loading agent instructions
-// and skill content from external files instead of inline strings.
+// This example demonstrates:
+// 1. Loading agent instructions and skill content from external files
+// 2. Auto-synthesis pattern using defer synth.AutoSynth()
 //
 // Benefits of loading from files:
 // 1. Better organization - keep large instructions separate from code
@@ -10,6 +11,11 @@
 // 3. Version control - track instruction changes independently
 // 4. Reusability - share instruction files across multiple agents
 // 5. Maintainability - easier to review and update long instructions
+//
+// Synthesis Model:
+// - SDK collects agent configuration in memory
+// - On program exit, defer synth.AutoSynth() writes manifest.pb
+// - CLI reads manifest.pb and deploys to platform
 //
 // Directory structure:
 //
@@ -20,7 +26,10 @@
 //	    ├── security-guidelines.md    (skill content)
 //	    └── testing-best-practices.md (skill content)
 //
-// Run: go run examples/06_agent_with_instructions_from_files.go
+// Run modes:
+// - Dry-run: go run examples/06_agent_with_instructions_from_files.go
+// - Synthesis: STIGMER_OUT_DIR=/tmp go run examples/06_agent_with_instructions_from_files.go
+//
 package main
 
 import (
@@ -28,13 +37,20 @@ import (
 	"log"
 
 	"github.com/leftbin/stigmer-sdk/go/agent"
+	"github.com/leftbin/stigmer-sdk/go/internal/synth"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
 	"github.com/leftbin/stigmer-sdk/go/subagent"
 )
 
 func main() {
-	fmt.Println("=== Example 06: Agent with Instructions from Files ===\n")
+	// IMPORTANT: Register auto-synth to run on exit
+	// This enables the synthesis model where manifest.pb is automatically written
+	// - If STIGMER_OUT_DIR is not set: Dry-run mode (prints success message)
+	// - If STIGMER_OUT_DIR is set: Synthesis mode (writes manifest.pb to that directory)
+	defer synth.AutoSynth()
+
+	fmt.Println("=== Example 06: Agent with Instructions from Files + Synthesis ===\n")
 
 	// Example 1: Basic agent with instructions from file
 	basicAgent := createBasicAgentFromFile()
@@ -194,5 +210,8 @@ func printAgent(title string, ag *agent.Agent) {
 		fmt.Printf("Instructions Preview: %s\n", preview)
 	}
 
-	fmt.Println("\n✅ Files loaded successfully! The CLI will send the full text to the Stigmer API.")
+	fmt.Println("\n✅ Files loaded successfully!")
+	fmt.Println("\nℹ️  Synthesis Mode:")
+	fmt.Println("   - Dry-run: No STIGMER_OUT_DIR set (current)")
+	fmt.Println("   - Synthesis: Set STIGMER_OUT_DIR=/tmp to write manifest.pb")
 }

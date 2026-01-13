@@ -76,6 +76,11 @@ func (h *HTTPServer) TimeoutSeconds() int32 {
 	return h.timeoutSeconds
 }
 
+// Type returns the server type (http).
+func (h *HTTPServer) Type() ServerType {
+	return TypeHTTP
+}
+
 // Validate checks if the HTTP server configuration is valid.
 func (h *HTTPServer) Validate() error {
 	if h.name == "" {

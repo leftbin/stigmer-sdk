@@ -119,9 +119,14 @@ This contract allows:
 
 ## Documentation
 
-- **Go SDK**: [go/README.md](./go/README.md)
-- **Architecture**: [docs/architecture.md](./docs/architecture.md)
-- **Manifest Proto Spec**: [docs/manifest-proto-spec.md](./docs/manifest-proto-spec.md)
+- **Complete Documentation Index**: [docs/README.md](./docs/README.md) - All SDK documentation
+- **Go SDK**: [go/README.md](./go/README.md) - Go SDK quick start
+  - [Go SDK Documentation](./go/docs/README.md) - Complete Go SDK docs
+  - [Buf Dependency Guide](./go/docs/guides/buf-dependency-guide.md) - Using Buf Schema Registry
+  - [Migration Guide](./go/docs/guides/migration-guide.md) - Proto-agnostic migration
+  - [Proto Mapping Reference](./go/docs/references/proto-mapping.md) - CLI conversion reference
+- **Python SDK**: [python/README.md](./python/README.md) - Python SDK overview
+  - [Python SDK Documentation](./python/docs/README.md) - Complete Python SDK docs
 - **Contributing**: [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## Features Across All SDKs
@@ -160,8 +165,19 @@ stigmer-sdk/
 ├── LICENSE                # Apache 2.0 License
 ├── CONTRIBUTING.md        # Contribution guidelines
 │
+├── docs/                  # SDK-wide documentation
+│   ├── README.md          # Documentation index
+│   ├── guides/
+│   ├── implementation/    # Implementation reports
+│   └── references/
+│
 ├── go/                    # Go SDK
-│   ├── README.md
+│   ├── README.md          # Go SDK quick start
+│   ├── docs/              # Go-specific documentation
+│   │   ├── README.md
+│   │   ├── guides/
+│   │   ├── implementation/
+│   │   └── references/
 │   ├── agent/
 │   ├── skill/
 │   ├── mcpserver/
@@ -170,14 +186,13 @@ stigmer-sdk/
 │   └── examples/
 │
 ├── python/                # Python SDK (future)
-│   └── README.md
+│   ├── README.md
+│   └── docs/              # Python-specific documentation
+│       ├── README.md
+│       └── implementation/
 │
-├── typescript/            # TypeScript SDK (future)
-│   └── README.md
-│
-└── docs/
-    ├── architecture.md
-    └── manifest-proto-spec.md
+└── typescript/            # TypeScript SDK (future)
+    └── README.md
 ```
 
 ## Contributing

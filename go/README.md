@@ -33,10 +33,13 @@ import (
     "github.com/leftbin/stigmer-sdk/go/agent"
     "github.com/leftbin/stigmer-sdk/go/skill"
     "github.com/leftbin/stigmer-sdk/go/mcpserver"
-    "github.com/leftbin/stigmer-sdk/go/environment"
+    "github.com/leftbin/stigmer-sdk/go/internal/synth"
 )
 
 func main() {
+    // Enable auto-synthesis (writes manifest.pb on exit)
+    defer synth.AutoSynth()
+    
     // Create inline skill from markdown file
     securitySkill, _ := skill.New(
         skill.WithName("security-guidelines"),
@@ -69,9 +72,8 @@ func main() {
         AddSkill(skill.Platform("coding-standards")). // Platform skill
         AddMCPServer(githubMCP)
     
-    // No proto conversion - SDK is proto-agnostic!
-    // The Stigmer CLI handles all proto conversion when you deploy
     fmt.Printf("Agent created: %s\n", myAgent.Name)
+    // On exit, defer synth.AutoSynth() automatically writes manifest.pb
 }
 ```
 
@@ -248,7 +250,7 @@ Platform (Stigmer API)
 - ✅ CLI handles all proto conversion and deployment
 - ✅ SDK and proto can evolve independently
 
-See [PROTO_MAPPING.md](PROTO_MAPPING.md) for how CLI converts SDK types to proto messages.
+See [docs/references/proto-mapping.md](docs/references/proto-mapping.md) for how CLI converts SDK types to proto messages.
 
 ## Validation
 
@@ -317,7 +319,7 @@ Full API documentation is available on [pkg.go.dev](https://pkg.go.dev/github.co
 
 ## Migration from Python SDK
 
-If you're migrating from the Python SDK, see [MIGRATION.md](MIGRATION.md) for a side-by-side comparison and translation guide.
+If you're migrating from the Python SDK, see [docs/guides/migration-guide.md](docs/guides/migration-guide.md) for a side-by-side comparison and translation guide.
 
 ## Project Structure
 
@@ -366,6 +368,17 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 ## Related Documentation
 
 - **Multi-language SDK Overview**: [Main README](../README.md)
-- **Migration Guide**: [MIGRATION.md](MIGRATION.md) - Migrating from proto-coupled design
-- **Proto Mapping**: [PROTO_MAPPING.md](PROTO_MAPPING.md) - CLI conversion reference
+- **Complete Go SDK Documentation**: [docs/README.md](docs/README.md) - Full documentation index
+
+### Architecture
+- **Synthesis Architecture**: [docs/architecture/synthesis-architecture.md](docs/architecture/synthesis-architecture.md) - Auto-synthesis model with defer pattern
+
+### Guides
+- **Migration Guide**: [docs/guides/migration-guide.md](docs/guides/migration-guide.md) - Migrating from proto-coupled design
+- **Buf Dependency Guide**: [docs/guides/buf-dependency-guide.md](docs/guides/buf-dependency-guide.md) - Using Buf Schema Registry
+
+### References
+- **Proto Mapping**: [docs/references/proto-mapping.md](docs/references/proto-mapping.md) - CLI conversion reference
+
+### Contributing
 - **Contributing**: [../CONTRIBUTING.md](../CONTRIBUTING.md)

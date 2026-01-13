@@ -2,8 +2,6 @@ package mcpserver
 
 import (
 	"testing"
-
-	agentpb "github.com/leftbin/stigmer/apis/stubs/go/ai/stigmer/agentic/agent/v1"
 )
 
 // Test Stdio Server
@@ -279,9 +277,9 @@ func TestServerType_String(t *testing.T) {
 		serverType ServerType
 		expected   string
 	}{
-		{ServerTypeStdio, "stdio"},
-		{ServerTypeHTTP, "http"},
-		{ServerTypeDocker, "docker"},
+		{TypeStdio, "stdio"},
+		{TypeHTTP, "http"},
+		{TypeDocker, "docker"},
 		{ServerType(999), "unknown"},
 	}
 
@@ -398,13 +396,5 @@ func BenchmarkDockerServer_Create(b *testing.B) {
 			WithImage("ghcr.io/org/mcp:latest"),
 			WithEnvPlaceholder("API_KEY", "${API_KEY}"),
 		)
-	}
-}
-
-// Helper function to verify proto message is not nil
-func assertProtoNotNil(t *testing.T, proto *agentpb.McpServerDefinition) {
-	t.Helper()
-	if proto == nil {
-		t.Fatal("expected proto message, got nil")
 	}
 }
