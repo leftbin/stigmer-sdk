@@ -27,7 +27,7 @@
 //
 //	// HTTP call
 //	workflow.AddTask(workflow.HttpCallTask("fetchData",
-//	    workflow.WithMethod("GET"),
+//	    workflow.WithHTTPGet(),  // Type-safe HTTP method
 //	    workflow.WithURI("${apiURL}/data"),
 //	    workflow.WithHeader("Authorization", "Bearer ${TOKEN}"),
 //	))
@@ -73,7 +73,7 @@
 // Control task execution flow using export and flow directives:
 //
 //	task := workflow.HttpCallTask("fetchData",
-//	    workflow.WithMethod("GET"),
+//	    workflow.WithHTTPGet(),  // Type-safe HTTP method
 //	    workflow.WithURI("${apiURL}/data"),
 //	)
 //	task.Export("${.}") // Export entire response
@@ -143,7 +143,7 @@
 //	    ))
 //
 //	    wf.AddTask(workflow.HttpCallTask("fetchData",
-//	        workflow.WithMethod("GET"),
+//	        workflow.WithHTTPGet(),  // Type-safe HTTP method
 //	        workflow.WithURI("${apiURL}/data"),
 //	        workflow.WithHeader("Authorization", "Bearer ${API_TOKEN}"),
 //	    )).Export("${.}").Then("processData")

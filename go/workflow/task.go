@@ -1,5 +1,10 @@
 package workflow
 
+import (
+	"fmt"
+	"strings"
+)
+
 // TaskKind represents the type of workflow task.
 type TaskKind string
 
@@ -17,6 +22,13 @@ const (
 	TaskKindCallActivity TaskKind = "CALL_ACTIVITY"
 	TaskKindRaise        TaskKind = "RAISE"
 	TaskKindRun          TaskKind = "RUN"
+)
+
+// Special task flow control constants.
+const (
+	// EndFlow indicates the workflow should terminate after this task.
+	// Use task.End() method instead of task.Then(EndFlow) for better readability.
+	EndFlow = "end"
 )
 
 // Task represents a single task in a workflow.
@@ -42,23 +54,66 @@ type TaskConfig interface {
 	isTaskConfig()
 }
 
-// Export sets the export directive for this task.
+// Export sets the export directive for this task using a low-level expression.
+// For most use cases, prefer ExportAll() or ExportField() for better UX.
 // Example: task.Export("${.}") exports entire output.
 func (t *Task) Export(expr string) *Task {
 	t.ExportAs = expr
 	return t
 }
 
-// Then sets the flow control directive for this task.
+// ExportAll exports the entire task output to the workflow context.
+// This is a high-level helper that replaces Export("${.}").
+// Example: HttpCallTask("fetch",...).ExportAll()
+func (t *Task) ExportAll() *Task {
+	t.ExportAs = "${.}"
+	return t
+}
+
+// ExportField exports a specific field from the task output to the workflow context.
+// This is a high-level helper that replaces Export("${.field}").
+// Example: HttpCallTask("fetch",...).ExportField("count")
+func (t *Task) ExportField(fieldName string) *Task {
+	t.ExportAs = fmt.Sprintf("${.%s}", fieldName)
+	return t
+}
+
+// ExportFields exports multiple fields from the task output to the workflow context.
+// Each field is exported with its original name.
+// Example: HttpCallTask("fetch",...).ExportFields("count", "status", "data")
+func (t *Task) ExportFields(fieldNames ...string) *Task {
+	// For multiple fields, we export the whole object and let the next task
+	// access specific fields. This is more efficient than creating separate exports.
+	// In the future, we could support selective field export if the proto supports it.
+	t.ExportAs = "${.}"
+	return t
+}
+
+// Then sets the flow control directive for this task using a task name string.
 // Example: task.Then("nextTask") jumps to task named "nextTask".
+//
+// For type-safe task references, use ThenTask() instead.
 func (t *Task) Then(taskName string) *Task {
 	t.ThenTask = taskName
 	return t
 }
 
+// ThenRef sets the flow control directive using a task reference.
+// This is type-safe and prevents typos in task names.
+//
+// Example:
+//
+//	task1 := workflow.SetTask("init", workflow.SetInt("x", 1))
+//	task2 := workflow.HttpCallTask("fetch", ...).ThenRef(task1)
+func (t *Task) ThenRef(task *Task) *Task {
+	t.ThenTask = task.Name
+	return t
+}
+
 // End terminates the workflow after this task.
+// This is equivalent to task.Then(workflow.EndFlow) but more explicit.
 func (t *Task) End() *Task {
-	t.ThenTask = "end"
+	t.ThenTask = EndFlow
 	return t
 }
 
@@ -105,6 +160,7 @@ func SetTask(name string, opts ...SetTaskOption) *Task {
 type SetTaskOption func(*SetTaskConfig)
 
 // SetVar adds a variable to a SET task.
+// For better type safety, consider using SetInt, SetString, SetBool instead.
 func SetVar(key, value string) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
 		cfg.Variables[key] = value
@@ -117,6 +173,40 @@ func SetVars(vars map[string]string) SetTaskOption {
 		for k, v := range vars {
 			cfg.Variables[k] = v
 		}
+	}
+}
+
+// SetInt adds an integer variable to a SET task with automatic type conversion.
+// This is a high-level helper that provides better UX than SetVar("count", "0").
+// Example: SetTask("init", SetInt("count", 0))
+func SetInt(key string, value int) SetTaskOption {
+	return func(cfg *SetTaskConfig) {
+		cfg.Variables[key] = fmt.Sprintf("%d", value)
+	}
+}
+
+// SetString adds a string variable to a SET task.
+// This is semantically clearer than SetVar for string values.
+// Example: SetTask("init", SetString("status", "pending"))
+func SetString(key, value string) SetTaskOption {
+	return func(cfg *SetTaskConfig) {
+		cfg.Variables[key] = value
+	}
+}
+
+// SetBool adds a boolean variable to a SET task with automatic type conversion.
+// Example: SetTask("init", SetBool("enabled", true))
+func SetBool(key string, value bool) SetTaskOption {
+	return func(cfg *SetTaskConfig) {
+		cfg.Variables[key] = fmt.Sprintf("%t", value)
+	}
+}
+
+// SetFloat adds a float variable to a SET task with automatic type conversion.
+// Example: SetTask("init", SetFloat("price", 99.99))
+func SetFloat(key string, value float64) SetTaskOption {
+	return func(cfg *SetTaskConfig) {
+		cfg.Variables[key] = fmt.Sprintf("%f", value)
 	}
 }
 
@@ -142,7 +232,7 @@ func (*HttpCallTaskConfig) isTaskConfig() {}
 // Example:
 //
 //	task := workflow.HttpCallTask("fetchData",
-//	    workflow.WithMethod("GET"),
+//	    workflow.WithHTTPGet(),  // Type-safe HTTP method
 //	    workflow.WithURI("https://api.example.com/data"),
 //	    workflow.WithHeader("Authorization", "Bearer ${TOKEN}"),
 //	)
@@ -167,10 +257,69 @@ func HttpCallTask(name string, opts ...HttpCallTaskOption) *Task {
 // HttpCallTaskOption is a functional option for configuring HTTP_CALL tasks.
 type HttpCallTaskOption func(*HttpCallTaskConfig)
 
-// WithMethod sets the HTTP method.
+// WithMethod sets the HTTP method using a string.
+// For common HTTP methods, prefer using the type-safe helpers:
+// WithHTTPGet(), WithHTTPPost(), WithHTTPPut(), WithHTTPPatch(), WithHTTPDelete(), etc.
+// Use this function for custom or non-standard HTTP methods.
 func WithMethod(method string) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
 		cfg.Method = method
+	}
+}
+
+// WithHTTPGet sets the HTTP method to GET.
+// This is a type-safe helper for the most common HTTP method.
+func WithHTTPGet() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "GET"
+	}
+}
+
+// WithHTTPPost sets the HTTP method to POST.
+// This is a type-safe helper for creating or submitting data.
+func WithHTTPPost() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "POST"
+	}
+}
+
+// WithHTTPPut sets the HTTP method to PUT.
+// This is a type-safe helper for updating or replacing resources.
+func WithHTTPPut() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "PUT"
+	}
+}
+
+// WithHTTPPatch sets the HTTP method to PATCH.
+// This is a type-safe helper for partial updates to resources.
+func WithHTTPPatch() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "PATCH"
+	}
+}
+
+// WithHTTPDelete sets the HTTP method to DELETE.
+// This is a type-safe helper for removing resources.
+func WithHTTPDelete() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "DELETE"
+	}
+}
+
+// WithHTTPHead sets the HTTP method to HEAD.
+// This is a type-safe helper for retrieving headers without body.
+func WithHTTPHead() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "HEAD"
+	}
+}
+
+// WithHTTPOptions sets the HTTP method to OPTIONS.
+// This is a type-safe helper for retrieving allowed methods and CORS.
+func WithHTTPOptions() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "OPTIONS"
 	}
 }
 
@@ -319,7 +468,9 @@ func SwitchTask(name string, opts ...SwitchTaskOption) *Task {
 // SwitchTaskOption is a functional option for configuring SWITCH tasks.
 type SwitchTaskOption func(*SwitchTaskConfig)
 
-// WithCase adds a conditional case.
+// WithCase adds a conditional case using a task name string.
+// For type-safe task references, use WithCaseRef instead.
+// Example: WithCase("${.status == 200}", "handleSuccess")
 func WithCase(condition, then string) SwitchTaskOption {
 	return func(cfg *SwitchTaskConfig) {
 		cfg.Cases = append(cfg.Cases, SwitchCase{
@@ -329,10 +480,33 @@ func WithCase(condition, then string) SwitchTaskOption {
 	}
 }
 
-// WithDefault sets the default task.
+// WithCaseRef adds a conditional case using a task reference.
+// This is type-safe and prevents typos in task names.
+// Example: WithCaseRef("${.status == 200}", successTask)
+func WithCaseRef(condition string, task *Task) SwitchTaskOption {
+	return func(cfg *SwitchTaskConfig) {
+		cfg.Cases = append(cfg.Cases, SwitchCase{
+			Condition: condition,
+			Then:      task.Name,
+		})
+	}
+}
+
+// WithDefault sets the default task using a task name string.
+// For type-safe task references, use WithDefaultRef instead.
+// Example: WithDefault("handleError")
 func WithDefault(task string) SwitchTaskOption {
 	return func(cfg *SwitchTaskConfig) {
 		cfg.DefaultTask = task
+	}
+}
+
+// WithDefaultRef sets the default task using a task reference.
+// This is type-safe and prevents typos in task names.
+// Example: WithDefaultRef(errorTask)
+func WithDefaultRef(task *Task) SwitchTaskOption {
+	return func(cfg *SwitchTaskConfig) {
+		cfg.DefaultTask = task.Name
 	}
 }
 
@@ -480,7 +654,7 @@ func (*TryTaskConfig) isTaskConfig() {}
 //
 //	task := workflow.TryTask("handleErrors",
 //	    workflow.WithTry(
-//	        workflow.HttpCallTask("risky", workflow.WithMethod("GET"), workflow.WithURI("${.url}")),
+//	        workflow.HttpCallTask("risky", workflow.WithHTTPGet(), workflow.WithURI("${.url}")),
 //	    ),
 //	    workflow.WithCatch([]string{"NetworkError"}, "err",
 //	        workflow.SetTask("logError", workflow.SetVar("error", "${err}")),
@@ -608,10 +782,94 @@ func WaitTask(name string, opts ...WaitTaskOption) *Task {
 type WaitTaskOption func(*WaitTaskConfig)
 
 // WithDuration sets the wait duration.
+// Accepts both string format and type-safe duration helpers.
+//
+// String format examples: "5s", "1m", "1h", "1d"
+//
+// For better type safety and IDE support, consider using duration helpers:
+//
+//	workflow.WithDuration(workflow.Seconds(5))   // Type-safe
+//	workflow.WithDuration(workflow.Minutes(30))  // Discoverable
+//	workflow.WithDuration("5s")                  // Also valid
 func WithDuration(duration string) WaitTaskOption {
 	return func(cfg *WaitTaskConfig) {
 		cfg.Duration = duration
 	}
+}
+
+// ============================================================================
+// Duration Builders - Type-safe helpers for time durations
+// ============================================================================
+
+// Seconds creates a duration string for the specified number of seconds.
+// This is a type-safe helper that replaces manual "Xs" string formatting.
+//
+// Example:
+//
+//	workflow.WaitTask("delay",
+//	    workflow.WithDuration(workflow.Seconds(5)),  // ✅ Type-safe!
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	WithDuration("5s")  // ❌ Not type-safe, typo-prone
+//	WithDuration(Seconds(5))  // ✅ Type-safe, discoverable
+func Seconds(count int) string {
+	return fmt.Sprintf("%ds", count)
+}
+
+// Minutes creates a duration string for the specified number of minutes.
+// This is a type-safe helper that replaces manual "Xm" string formatting.
+//
+// Example:
+//
+//	workflow.WaitTask("delay",
+//	    workflow.WithDuration(workflow.Minutes(5)),
+//	)
+//
+// Common use cases:
+//   - Polling intervals
+//   - Retry delays
+//   - Timeout configurations
+//   - Rate limiting windows
+func Minutes(count int) string {
+	return fmt.Sprintf("%dm", count)
+}
+
+// Hours creates a duration string for the specified number of hours.
+// This is a type-safe helper that replaces manual "Xh" string formatting.
+//
+// Example:
+//
+//	workflow.WaitTask("delay",
+//	    workflow.WithDuration(workflow.Hours(2)),
+//	)
+//
+// Common use cases:
+//   - Long-running batch jobs
+//   - Scheduled task delays
+//   - Cache expiration
+//   - Token validity periods
+func Hours(count int) string {
+	return fmt.Sprintf("%dh", count)
+}
+
+// Days creates a duration string for the specified number of days.
+// This is a type-safe helper that replaces manual "Xd" string formatting.
+//
+// Example:
+//
+//	workflow.WaitTask("delay",
+//	    workflow.WithDuration(workflow.Days(7)),
+//	)
+//
+// Common use cases:
+//   - Weekly scheduled tasks
+//   - Retention periods
+//   - Subscription renewals
+//   - Long-term delays
+func Days(count int) string {
+	return fmt.Sprintf("%dd", count)
 }
 
 // ============================================================================
@@ -779,4 +1037,315 @@ func WithWorkflowInput(input map[string]any) RunTaskOption {
 	return func(cfg *RunTaskConfig) {
 		cfg.Input = input
 	}
+}
+
+// ============================================================================
+// Variable Interpolation Helpers
+// ============================================================================
+
+// VarRef creates a reference to a workflow variable.
+// This is a high-level helper that replaces manual "${varName}" syntax.
+// Example: WithURI(VarRef("apiURL") + "/data") instead of WithURI("${apiURL}/data")
+func VarRef(varName string) string {
+	return fmt.Sprintf("${%s}", varName)
+}
+
+// FieldRef creates a reference to a field in the current context.
+// This is a high-level helper that replaces manual "${.field}" syntax.
+// Example: SetVar("count", FieldRef("count")) instead of SetVar("count", "${.count}")
+func FieldRef(fieldPath string) string {
+	return fmt.Sprintf("${.%s}", fieldPath)
+}
+
+// Interpolate combines static text with variable references.
+// This provides a cleaner way to build strings with variable interpolation.
+// Example: Interpolate(VarRef("apiURL"), "/data") instead of "${apiURL}/data"
+func Interpolate(parts ...string) string {
+	result := ""
+	for _, part := range parts {
+		result += part
+	}
+	return result
+}
+
+// ============================================================================
+// Error Field Accessors - Type-safe helpers for accessing caught error fields
+// ============================================================================
+
+// ErrorMessage returns a reference to the message field of a caught error.
+// This is a type-safe helper that replaces manual "${errorVar.message}" syntax.
+//
+// When an error is caught in a CATCH block with `as: "errorVar"`, the error object
+// contains several fields. ErrorMessage() provides a discoverable way to access
+// the human-readable error description.
+//
+// Example:
+//
+//	workflow.WithCatchTyped(
+//	    workflow.CatchHTTPErrors(),
+//	    "httpErr",
+//	    workflow.SetTask("handleError",
+//	        workflow.SetVar("errorMessage", workflow.ErrorMessage("httpErr")),
+//	    ),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("errorMessage", "${httpErr.message}")  // ❌ Old way - not discoverable
+//	SetVar("errorMessage", ErrorMessage("httpErr")) // ✅ New way - type-safe
+func ErrorMessage(errorVar string) string {
+	return fmt.Sprintf("${%s.message}", errorVar)
+}
+
+// ErrorCode returns a reference to the code field of a caught error.
+// This is a type-safe helper that replaces manual "${errorVar.code}" syntax.
+//
+// The error code is a machine-readable string that indicates the error type.
+// This is useful for logging or conditional logic based on error types.
+//
+// Example:
+//
+//	workflow.WithCatchTyped(
+//	    workflow.CatchAny(),
+//	    "err",
+//	    workflow.SetTask("logError",
+//	        workflow.SetVar("errorCode", workflow.ErrorCode("err")),
+//	    ),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("errorCode", "${err.code}")  // ❌ Old way - not discoverable
+//	SetVar("errorCode", ErrorCode("err")) // ✅ New way - type-safe
+func ErrorCode(errorVar string) string {
+	return fmt.Sprintf("${%s.code}", errorVar)
+}
+
+// ErrorStackTrace returns a reference to the stackTrace field of a caught error.
+// This is a type-safe helper that replaces manual "${errorVar.stackTrace}" syntax.
+//
+// The stack trace provides debugging information about where the error occurred.
+// This is optional and may not be present for all error types.
+//
+// Example:
+//
+//	workflow.WithCatchTyped(
+//	    workflow.CatchAny(),
+//	    "err",
+//	    workflow.SetTask("logError",
+//	        workflow.SetVar("errorStackTrace", workflow.ErrorStackTrace("err")),
+//	    ),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("errorStackTrace", "${err.stackTrace}")  // ❌ Old way - not discoverable
+//	SetVar("errorStackTrace", ErrorStackTrace("err")) // ✅ New way - type-safe
+func ErrorStackTrace(errorVar string) string {
+	return fmt.Sprintf("${%s.stackTrace}", errorVar)
+}
+
+// ErrorObject returns a reference to the entire caught error object.
+// This is a type-safe helper that replaces manual "${errorVar}" syntax.
+//
+// Use this when you want to pass the entire error object (with all fields)
+// to another task, such as logging or external error tracking services.
+//
+// Example:
+//
+//	workflow.WithCatchTyped(
+//	    workflow.CatchAny(),
+//	    "err",
+//	    workflow.HttpCallTask("reportError",
+//	        workflow.WithHTTPPost(),
+//	        workflow.WithURI("https://api.example.com/errors"),
+//	        workflow.WithBody(map[string]any{
+//	            "error": workflow.ErrorObject("err"), // Pass entire error
+//	            "workflow": "data-pipeline",
+//	        }),
+//	    ),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	"error": "${err}"  // ❌ Old way - not discoverable
+//	"error": ErrorObject("err") // ✅ New way - type-safe
+func ErrorObject(errorVar string) string {
+	return fmt.Sprintf("${%s}", errorVar)
+}
+
+// ============================================================================
+// Arithmetic Expression Builders - Common patterns for computed values
+// ============================================================================
+
+// Increment returns an expression that adds 1 to a variable.
+// This is a high-level helper for the extremely common pattern of incrementing counters.
+//
+// Use this for retry counters, iteration counts, and other increment scenarios.
+//
+// Example:
+//
+//	workflow.SetTask("retry",
+//	    workflow.SetVar("retryCount", workflow.Increment("retryCount")),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("retryCount", "${retryCount + 1}")  // ❌ Old way - not discoverable
+//	SetVar("retryCount", Increment("retryCount")) // ✅ New way - type-safe
+//
+// Common use cases:
+//   - Retry counters in error handling
+//   - Loop iteration counters
+//   - Attempt tracking
+//   - Step numbering
+func Increment(varName string) string {
+	return fmt.Sprintf("${%s + 1}", varName)
+}
+
+// Decrement returns an expression that subtracts 1 from a variable.
+// This is a high-level helper for the common pattern of decrementing counters.
+//
+// Use this for countdown timers, remaining items, and other decrement scenarios.
+//
+// Example:
+//
+//	workflow.SetTask("processItem",
+//	    workflow.SetVar("remaining", workflow.Decrement("remaining")),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("remaining", "${remaining - 1}")  // ❌ Old way - not discoverable
+//	SetVar("remaining", Decrement("remaining")) // ✅ New way - type-safe
+//
+// Common use cases:
+//   - Countdown timers
+//   - Remaining items tracking
+//   - Capacity tracking
+//   - Quota management
+func Decrement(varName string) string {
+	return fmt.Sprintf("${%s - 1}", varName)
+}
+
+// Expr provides an escape hatch for complex expressions that don't have dedicated helpers.
+// Use this when you need arithmetic, string concatenation, or other computations
+// that aren't covered by simple helpers like Increment() or Decrement().
+//
+// This is the "progressive disclosure" pattern - simple things use helpers,
+// complex things use expressions directly.
+//
+// Example:
+//
+//	// Complex arithmetic
+//	workflow.SetVar("total", workflow.Expr("(price * quantity) + tax"))
+//
+//	// String concatenation
+//	workflow.SetVar("fullName", workflow.Expr("firstName + ' ' + lastName"))
+//
+//	// Conditional expressions
+//	workflow.SetVar("status", workflow.Expr("score >= 90 ? 'A' : 'B'"))
+//
+// Note: For simple cases, prefer dedicated helpers:
+//   - Use Increment("x") instead of Expr("x + 1")
+//   - Use VarRef("name") instead of Expr("name") for simple references
+//   - Use ErrorMessage("err") instead of Expr("err.message") for error fields
+func Expr(expression string) string {
+	return fmt.Sprintf("${%s}", expression)
+}
+
+// ============================================================================
+// Condition Builders - High-level helpers for building conditional expressions
+// ============================================================================
+
+// Field returns a field reference expression (without ${} wrapper) for use in conditions.
+// This is specifically for condition builders. For variable interpolation, use FieldRef().
+// Example: Field("status") returns ".status"
+func Field(fieldPath string) string {
+	return fmt.Sprintf(".%s", fieldPath)
+}
+
+// Var returns a variable reference expression (without ${} wrapper) for use in conditions.
+// This is specifically for condition builders. For variable interpolation, use VarRef().
+// Example: Var("apiURL") returns "apiURL"
+func Var(varName string) string {
+	return varName
+}
+
+// Literal returns a literal value wrapped in quotes for use in conditions.
+// Example: Literal("200") returns "\"200\""
+func Literal(value string) string {
+	return fmt.Sprintf("\"%s\"", value)
+}
+
+// Number returns a numeric literal for use in conditions (no quotes).
+// Example: Number(200) returns "200"
+func Number(value interface{}) string {
+	return fmt.Sprintf("%v", value)
+}
+
+// Equals builds an equality condition expression.
+// Example: Equals(Field("status"), Number(200)) generates "${.status == 200}"
+func Equals(left, right string) string {
+	return fmt.Sprintf("${%s == %s}", left, right)
+}
+
+// NotEquals builds an inequality condition expression.
+// Example: NotEquals(FieldRef("status"), "200") generates "${.status != 200}"
+func NotEquals(left, right string) string {
+	return fmt.Sprintf("${%s != %s}", left, right)
+}
+
+// GreaterThan builds a greater-than condition expression.
+// Example: GreaterThan(FieldRef("count"), "10") generates "${.count > 10}"
+func GreaterThan(left, right string) string {
+	return fmt.Sprintf("${%s > %s}", left, right)
+}
+
+// GreaterThanOrEqual builds a greater-than-or-equal condition expression.
+// Example: GreaterThanOrEqual(FieldRef("status"), "500") generates "${.status >= 500}"
+func GreaterThanOrEqual(left, right string) string {
+	return fmt.Sprintf("${%s >= %s}", left, right)
+}
+
+// LessThan builds a less-than condition expression.
+// Example: LessThan(FieldRef("count"), "100") generates "${.count < 100}"
+func LessThan(left, right string) string {
+	return fmt.Sprintf("${%s < %s}", left, right)
+}
+
+// LessThanOrEqual builds a less-than-or-equal condition expression.
+// Example: LessThanOrEqual(FieldRef("count"), "100") generates "${.count <= 100}"
+func LessThanOrEqual(left, right string) string {
+	return fmt.Sprintf("${%s <= %s}", left, right)
+}
+
+// And combines multiple conditions with logical AND.
+// Example: And(Equals(FieldRef("status"), "200"), Equals(FieldRef("type"), "success"))
+func And(conditions ...string) string {
+	// Remove ${ and } wrappers from conditions for proper nesting
+	unwrapped := make([]string, len(conditions))
+	for i, cond := range conditions {
+		unwrapped[i] = strings.TrimPrefix(strings.TrimSuffix(cond, "}"), "${")
+	}
+	return fmt.Sprintf("${%s}", strings.Join(unwrapped, " && "))
+}
+
+// Or combines multiple conditions with logical OR.
+// Example: Or(Equals(FieldRef("status"), "200"), Equals(FieldRef("status"), "201"))
+func Or(conditions ...string) string {
+	// Remove ${ and } wrappers from conditions for proper nesting
+	unwrapped := make([]string, len(conditions))
+	for i, cond := range conditions {
+		unwrapped[i] = strings.TrimPrefix(strings.TrimSuffix(cond, "}"), "${")
+	}
+	return fmt.Sprintf("${%s}", strings.Join(unwrapped, " || "))
+}
+
+// Not negates a condition.
+// Example: Not(Equals(FieldRef("status"), "200")) generates "${!(.status == 200)}"
+func Not(condition string) string {
+	// Remove ${ and } wrapper from condition for proper nesting
+	unwrapped := strings.TrimPrefix(strings.TrimSuffix(condition, "}"), "${")
+	return fmt.Sprintf("${!(%s)}", unwrapped)
 }

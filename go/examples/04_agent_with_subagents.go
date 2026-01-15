@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 
+	stigmeragent "github.com/leftbin/stigmer-sdk/go"
 	"github.com/leftbin/stigmer-sdk/go/agent"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
@@ -20,6 +21,8 @@ import (
 )
 
 func main() {
+	defer stigmeragent.Complete()
+
 	fmt.Println("=== Example 04: Agent with Sub-Agents ===\n")
 
 	// Example 1: Simple inline sub-agent

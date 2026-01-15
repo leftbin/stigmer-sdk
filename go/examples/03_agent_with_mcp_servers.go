@@ -2,14 +2,13 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 
+	stigmeragent "github.com/leftbin/stigmer-sdk/go"
 	"github.com/leftbin/stigmer-sdk/go/agent"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // This example demonstrates creating an agent with all three types of MCP servers:
@@ -17,6 +16,8 @@ import (
 // 2. HTTP server (remote services)
 // 3. Docker server (containerized)
 func main() {
+	defer stigmeragent.Complete()
+
 	// Create Stdio MCP Server (GitHub)
 	// Most common type - runs as subprocess with stdin/stdout communication
 	githubServer, err := mcpserver.Stdio(

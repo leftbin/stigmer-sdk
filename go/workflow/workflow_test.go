@@ -57,14 +57,13 @@ func TestWorkflow_New(t *testing.T) {
 			errMsg:  "name is required",
 		},
 		{
-			name: "missing version",
+			name: "missing version (defaults to 0.1.0)",
 			opts: []workflow.Option{
 				workflow.WithNamespace("test-namespace"),
 				workflow.WithName("test-workflow"),
 				workflow.WithTask(workflow.SetTask("init", workflow.SetVar("x", "1"))),
 			},
-			wantErr: true,
-			errMsg:  "version is required",
+			wantErr: false, // Version is now optional, defaults to "0.1.0"
 		},
 		{
 			name: "invalid version (not semver)",
@@ -106,6 +105,23 @@ func TestWorkflow_New(t *testing.T) {
 				t.Error("New() returned nil workflow without error")
 			}
 		})
+	}
+}
+
+func TestWorkflow_DefaultVersion(t *testing.T) {
+	// Test that version defaults to "0.1.0" when not provided
+	wf, err := workflow.New(
+		workflow.WithNamespace("test"),
+		workflow.WithName("test-workflow"),
+		workflow.WithTask(workflow.SetTask("task1", workflow.SetInt("x", 1))),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create workflow: %v", err)
+	}
+
+	expectedVersion := "0.1.0"
+	if wf.Document.Version != expectedVersion {
+		t.Errorf("Default version = %q, want %q", wf.Document.Version, expectedVersion)
 	}
 }
 

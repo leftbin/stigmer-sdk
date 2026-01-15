@@ -2,15 +2,16 @@ package synth
 
 import (
 	"fmt"
+	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
 	// Import Buf-generated proto packages
+	apiresource "buf.build/gen/go/leftbin/stigmer/protocolbuffers/go/ai/stigmer/commons/apiresource"
 	workflowv1 "buf.build/gen/go/leftbin/stigmer/protocolbuffers/go/ai/stigmer/agentic/workflow/v1"
 	sdk "buf.build/gen/go/leftbin/stigmer/protocolbuffers/go/ai/stigmer/commons/sdk"
 
 	// Import SDK types
-	"github.com/leftbin/stigmer-sdk/go/environment"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -22,17 +23,24 @@ import (
 // Conversion mapping:
 //   - workflow.Workflow → workflowv1.Workflow
 //   - workflow.Task → workflowv1.WorkflowTask
-//   - environment.Variable → workflowv1.EnvironmentSpec
 //
 // Returns an error if any nested conversion fails.
-func ToWorkflowManifest(workflowInterfaces ...interface{}) (*sdk.WorkflowManifest, error) {
+func ToWorkflowManifest(workflowInterfaces ...interface{}) (*workflowv1.WorkflowManifest, error) {
 	if len(workflowInterfaces) == 0 {
 		return nil, fmt.Errorf("at least one workflow is required")
 	}
 
+	// Create SDK metadata
+	sdkMetadata := &sdk.SdkMetadata{
+		Language:    "go",
+		Version:     "0.1.0", // TODO: Get from build info
+		GeneratedAt: time.Now().Unix(),
+	}
+
 	// Create manifest with empty workflows list
-	manifest := &sdk.WorkflowManifest{
-		Workflows: []*workflowv1.Workflow{},
+	manifest := &workflowv1.WorkflowManifest{
+		SdkMetadata: sdkMetadata,
+		Workflows:   []*workflowv1.Workflow{},
 	}
 
 	// Convert each workflow
@@ -81,15 +89,14 @@ func workflowToProto(wf *workflow.Workflow) (*workflowv1.Workflow, error) {
 func workflowSpecToProto(wf *workflow.Workflow) (*workflowv1.WorkflowSpec, error) {
 	spec := &workflowv1.WorkflowSpec{
 		Description: wf.Description,
-	}
-
-	// Convert document
-	spec.Document = &workflowv1.WorkflowDocument{
-		Dsl:         wf.Document.DSL,
-		Namespace:   wf.Document.Namespace,
-		Name:        wf.Document.Name,
-		Version:     wf.Document.Version,
-		Description: wf.Document.Description,
+		Document: &workflowv1.WorkflowDocument{
+			Dsl:         wf.Document.DSL,
+			Namespace:   wf.Document.Namespace,
+			Name:        wf.Document.Name,
+			Version:     wf.Document.Version,
+			Description: wf.Document.Description,
+		},
+		Tasks: []*workflowv1.WorkflowTask{},
 	}
 
 	// Convert tasks
@@ -101,33 +108,27 @@ func workflowSpecToProto(wf *workflow.Workflow) (*workflowv1.WorkflowSpec, error
 		spec.Tasks = append(spec.Tasks, protoTask)
 	}
 
-	// Convert environment variables
-	if len(wf.EnvironmentVariables) > 0 {
-		envSpec, err := environmentVariablesToEnvSpec(wf.EnvironmentVariables)
-		if err != nil {
-			return nil, fmt.Errorf("converting environment variables: %w", err)
-		}
-		spec.EnvSpec = envSpec
-	}
+	// Convert environment variables (if any)
+	// Note: Environment spec conversion is deferred as the proto structure may not be finalized
+	// For now, we'll skip env spec conversion
+	// TODO: Implement environmentVariablesToEnvSpec when proto structure is finalized
 
 	return spec, nil
 }
 
 // taskToProto converts a workflow.Task to a workflowv1.WorkflowTask proto.
 func taskToProto(task *workflow.Task) (*workflowv1.WorkflowTask, error) {
-	protoTask := &workflowv1.WorkflowTask{
-		Name: task.Name,
-		// Kind will be set based on task type
-	}
-
 	// Convert task config to google.protobuf.Struct
-	taskConfig, taskKind, err := taskConfigToStruct(task)
+	taskConfig, err := taskConfigToStruct(task)
 	if err != nil {
 		return nil, fmt.Errorf("converting task config: %w", err)
 	}
 
-	protoTask.Kind = taskKind
-	protoTask.TaskConfig = taskConfig
+	protoTask := &workflowv1.WorkflowTask{
+		Name:       task.Name,
+		Kind:       taskKindToProtoKind(task.Kind),
+		TaskConfig: taskConfig,
+	}
 
 	// Convert export if present
 	if task.ExportAs != "" {
@@ -146,35 +147,90 @@ func taskToProto(task *workflow.Task) (*workflowv1.WorkflowTask, error) {
 	return protoTask, nil
 }
 
+// taskKindToProtoKind converts SDK task kind to proto enum value.
+func taskKindToProtoKind(kind workflow.TaskKind) apiresource.WorkflowTaskKind {
+	// Map SDK task kind string to proto enum value
+	// These values must match the WorkflowTaskKind enum in ai/stigmer/commons/apiresource/enum.proto
+	kindMap := map[workflow.TaskKind]apiresource.WorkflowTaskKind{
+		workflow.TaskKindSet:          apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_SET,
+		workflow.TaskKindHttpCall:     apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_HTTP_CALL,
+		workflow.TaskKindGrpcCall:     apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_GRPC_CALL,
+		workflow.TaskKindCallActivity: apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_CALL_ACTIVITY,
+		workflow.TaskKindSwitch:       apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_SWITCH,
+		workflow.TaskKindFor:          apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_FOR,
+		workflow.TaskKindFork:         apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_FORK,
+		workflow.TaskKindTry:          apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_TRY,
+		workflow.TaskKindListen:       apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_LISTEN,
+		workflow.TaskKindWait:         apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_WAIT,
+		workflow.TaskKindRaise:        apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RAISE,
+		workflow.TaskKindRun:          apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RUN,
+	}
+	return kindMap[kind]
+}
+
+// stringMapToInterface converts map[string]string to map[string]interface{}.
+// This is needed because structpb.NewStruct cannot handle map[string]string directly.
+func stringMapToInterface(m map[string]string) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+	return result
+}
+
+// mapSliceToInterfaceSlice converts []map[string]interface{} to []interface{}.
+// This is needed because structpb.NewStruct cannot handle []map[string]interface{} directly.
+func mapSliceToInterfaceSlice(slice []map[string]interface{}) []interface{} {
+	if slice == nil {
+		return nil
+	}
+	result := make([]interface{}, len(slice))
+	for i, m := range slice {
+		result[i] = m
+	}
+	return result
+}
+
+// stringSliceToInterfaceSlice converts []string to []interface{}.
+// This is needed because structpb.NewStruct cannot handle []string directly in nested structures.
+func stringSliceToInterfaceSlice(slice []string) []interface{} {
+	if slice == nil {
+		return nil
+	}
+	result := make([]interface{}, len(slice))
+	for i, s := range slice {
+		result[i] = s
+	}
+	return result
+}
+
 // taskConfigToStruct converts task configuration to google.protobuf.Struct.
-func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, int32, error) {
-	// Map SDK task kind to proto enum
-	var protoKind int32
+func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 	var configMap map[string]interface{}
 
 	switch task.Kind {
 	case workflow.TaskKindSet:
-		protoKind = 1 // SET
 		cfg := task.Config.(*workflow.SetTaskConfig)
 		configMap = map[string]interface{}{
-			"variables": cfg.Variables,
+			"variables": stringMapToInterface(cfg.Variables),
 		}
 
 	case workflow.TaskKindHttpCall:
-		protoKind = 2 // HTTP_CALL
 		cfg := task.Config.(*workflow.HttpCallTaskConfig)
 		configMap = map[string]interface{}{
 			"method": cfg.Method,
 			"endpoint": map[string]interface{}{
 				"uri": cfg.URI,
 			},
-			"headers":        cfg.Headers,
-			"body":           cfg.Body,
+			"headers":         stringMapToInterface(cfg.Headers),
+			"body":            cfg.Body,
 			"timeout_seconds": cfg.TimeoutSeconds,
 		}
 
 	case workflow.TaskKindGrpcCall:
-		protoKind = 3 // GRPC_CALL
 		cfg := task.Config.(*workflow.GrpcCallTaskConfig)
 		configMap = map[string]interface{}{
 			"service": cfg.Service,
@@ -183,7 +239,6 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, int32, error) {
 		}
 
 	case workflow.TaskKindSwitch:
-		protoKind = 4 // SWITCH
 		cfg := task.Config.(*workflow.SwitchTaskConfig)
 		cases := make([]map[string]interface{}, len(cfg.Cases))
 		for i, c := range cfg.Cases {
@@ -193,27 +248,25 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, int32, error) {
 			}
 		}
 		configMap = map[string]interface{}{
-			"cases":   cases,
+			"cases":   mapSliceToInterfaceSlice(cases),
 			"default": cfg.DefaultTask,
 		}
 
 	case workflow.TaskKindFor:
-		protoKind = 5 // FOR
 		cfg := task.Config.(*workflow.ForTaskConfig)
 		doTasks := make([]map[string]interface{}, len(cfg.Do))
 		for i, t := range cfg.Do {
 			doTasks[i] = map[string]interface{}{
 				"name": t.Name,
-				"kind": t.Kind,
+				"kind": string(t.Kind), // Convert TaskKind enum to string
 			}
 		}
 		configMap = map[string]interface{}{
 			"in": cfg.In,
-			"do": doTasks,
+			"do": mapSliceToInterfaceSlice(doTasks),
 		}
 
 	case workflow.TaskKindFork:
-		protoKind = 6 // FORK
 		cfg := task.Config.(*workflow.ForkTaskConfig)
 		branches := make([]map[string]interface{}, len(cfg.Branches))
 		for i, b := range cfg.Branches {
@@ -222,39 +275,35 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, int32, error) {
 			}
 		}
 		configMap = map[string]interface{}{
-			"branches": branches,
+			"branches": mapSliceToInterfaceSlice(branches),
 		}
 
 	case workflow.TaskKindTry:
-		protoKind = 7 // TRY
 		cfg := task.Config.(*workflow.TryTaskConfig)
 		catchBlocks := make([]map[string]interface{}, len(cfg.Catch))
 		for i, c := range cfg.Catch {
 			catchBlocks[i] = map[string]interface{}{
-				"errors": c.Errors,
+				"errors": stringSliceToInterfaceSlice(c.Errors), // Convert []string to []interface{}
 				"as":     c.As,
 			}
 		}
 		configMap = map[string]interface{}{
-			"catch": catchBlocks,
+			"catch": mapSliceToInterfaceSlice(catchBlocks),
 		}
 
 	case workflow.TaskKindListen:
-		protoKind = 8 // LISTEN
 		cfg := task.Config.(*workflow.ListenTaskConfig)
 		configMap = map[string]interface{}{
 			"event": cfg.Event,
 		}
 
 	case workflow.TaskKindWait:
-		protoKind = 9 // WAIT
 		cfg := task.Config.(*workflow.WaitTaskConfig)
 		configMap = map[string]interface{}{
 			"duration": cfg.Duration,
 		}
 
 	case workflow.TaskKindCallActivity:
-		protoKind = 10 // CALL_ACTIVITY
 		cfg := task.Config.(*workflow.CallActivityTaskConfig)
 		configMap = map[string]interface{}{
 			"activity": cfg.Activity,
@@ -262,7 +311,6 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, int32, error) {
 		}
 
 	case workflow.TaskKindRaise:
-		protoKind = 11 // RAISE
 		cfg := task.Config.(*workflow.RaiseTaskConfig)
 		configMap = map[string]interface{}{
 			"error":   cfg.Error,
@@ -271,7 +319,6 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, int32, error) {
 		}
 
 	case workflow.TaskKindRun:
-		protoKind = 12 // RUN
 		cfg := task.Config.(*workflow.RunTaskConfig)
 		configMap = map[string]interface{}{
 			"workflow": cfg.WorkflowName,
@@ -279,22 +326,14 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, int32, error) {
 		}
 
 	default:
-		return nil, 0, fmt.Errorf("unknown task kind: %s", task.Kind)
+		return nil, fmt.Errorf("unknown task kind: %s", task.Kind)
 	}
 
 	// Convert to protobuf Struct
 	pbStruct, err := structpb.NewStruct(configMap)
 	if err != nil {
-		return nil, 0, fmt.Errorf("creating protobuf struct: %w", err)
+		return nil, fmt.Errorf("creating protobuf struct: %w", err)
 	}
 
-	return pbStruct, protoKind, nil
-}
-
-// environmentVariablesToEnvSpec converts environment variables to EnvironmentSpec proto.
-func environmentVariablesToEnvSpec(vars []environment.Variable) (*workflowv1.EnvironmentSpec, error) {
-	// This would need the actual EnvironmentSpec proto definition
-	// For now, return a placeholder
-	// TODO: Implement when EnvironmentSpec proto is available
-	return nil, nil
+	return pbStruct, nil
 }

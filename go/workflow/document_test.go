@@ -68,15 +68,14 @@ func TestWorkflow_DocumentValidation(t *testing.T) {
 			errMsg:  "name is required",
 		},
 		{
-			name: "empty version",
+			name: "empty version (defaults to 0.1.0)",
 			opts: []workflow.Option{
 				workflow.WithNamespace("my-namespace"),
 				workflow.WithName("my-workflow"),
 				workflow.WithVersion(""),
 				workflow.WithTask(workflow.SetTask("init", workflow.SetVar("x", "1"))),
 			},
-			wantErr: true,
-			errMsg:  "version is required",
+			wantErr: false, // Empty version is now valid, defaults to "0.1.0"
 		},
 		{
 			name: "invalid version format",
