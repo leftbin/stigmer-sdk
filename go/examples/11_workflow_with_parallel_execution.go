@@ -32,11 +32,12 @@ func main() {
 	defer stigmeragent.Complete()
 
 	// Task 1: Fetch data to process
+	// Using JSONPlaceholder - a free fake REST API for testing and prototyping
 	// ExportAll() makes entire response available to parallel branches
 	fetchTask := workflow.HttpCallTask("fetchData",
 		workflow.WithHTTPGet(), // Type-safe HTTP method
-		workflow.WithURI("https://api.example.com/data"),
-	).ExportAll() // All branches can access this data via FieldRef("data")
+		workflow.WithURI("https://jsonplaceholder.typicode.com/posts/1"),
+	).ExportAll() // All branches can access this data via FieldRef("title"), FieldRef("body"), etc.
 
 	// Task 2: Fork into 4 parallel branches
 	//
@@ -44,25 +45,26 @@ func main() {
 	//   fetchData (GET /data → exports to all branches)
 	//        ↓
 	//   parallelProcessing (FORK - all branches execute concurrently)
-	//        ├─ analytics branch      (POST /analytics → export result)
-	//        ├─ validation branch     (POST /validate → export result)
-	//        ├─ transformation branch (POST /transform → export result)
-	//        └─ notification branch   (POST /notify → send alert)
+	//        ├─ analytics branch      (POST /posts → export result)
+	//        ├─ validation branch     (POST /posts → export result)
+	//        ├─ transformation branch (POST /posts → export result)
+	//        └─ notification branch   (POST /posts → send alert)
 	//        ↓ (automatic join - waits for ALL branches to complete)
 	//   aggregateResults (collect all branch results)
 	//        ↓
-	//   sendCompletion (POST /completion with aggregated data)
+	//   sendCompletion (POST /posts with aggregated data)
 	forkTask := workflow.ForkTask("parallelProcessing",
 		// Branch 1: Analytics processing (runs concurrently with other branches)
 		workflow.WithBranch("analytics",
 			workflow.HttpCallTask("computeAnalytics",
 				workflow.WithHTTPPost(), // Type-safe HTTP method
-				workflow.WithURI("https://api.example.com/analytics"),
+				workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
 				workflow.WithBody(map[string]any{
-					"data": workflow.FieldRef("data"), // ✅ Access fetched data
-					"type": "analytics",
+					"title": "Analytics Result",
+					"body":  workflow.Interpolate("Analyzing post: ", workflow.FieldRef("title")),
+					"type":  "analytics",
 				}),
-			).ExportField("analytics"), // Make result available to aggregateResults
+			).ExportField("id"), // Make result available to aggregateResults
 
 			workflow.SetTask("storeAnalytics",
 				workflow.SetBool("analyticsComplete", true), // ✅ Mark branch complete
@@ -73,11 +75,12 @@ func main() {
 		workflow.WithBranch("validation",
 			workflow.HttpCallTask("validateData",
 				workflow.WithHTTPPost(), // Type-safe HTTP method
-				workflow.WithURI("https://api.example.com/validate"),
+				workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
 				workflow.WithBody(map[string]any{
-					"data": workflow.FieldRef("data"), // ✅ Access fetched data
+					"title": "Validation Result",
+					"body":  workflow.Interpolate("Validating post: ", workflow.FieldRef("title")),
 				}),
-			).ExportField("validationResult"), // Export validation result
+			).ExportField("id"), // Export validation result
 
 			workflow.SetTask("storeValidation",
 				workflow.SetBool("validationComplete", true), // ✅ Mark branch complete
@@ -88,12 +91,13 @@ func main() {
 		workflow.WithBranch("transformation",
 			workflow.HttpCallTask("transformData",
 				workflow.WithHTTPPost(), // Type-safe HTTP method
-				workflow.WithURI("https://api.example.com/transform"),
+				workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
 				workflow.WithBody(map[string]any{
-					"data":   workflow.FieldRef("data"), // ✅ Access fetched data
+					"title":  "Transformation Result",
+					"body":   workflow.Interpolate("Transformed: ", workflow.FieldRef("body")),
 					"format": "json",
 				}),
-			).ExportField("transformed"), // Export transformed data
+			).ExportField("id"), // Export transformed data ID
 
 			workflow.SetTask("storeTransformed",
 				workflow.SetBool("transformationComplete", true), // ✅ Mark branch complete
@@ -104,10 +108,11 @@ func main() {
 		workflow.WithBranch("notification",
 			workflow.HttpCallTask("sendNotification",
 				workflow.WithHTTPPost(), // Type-safe HTTP method
-				workflow.WithURI("https://api.example.com/notify"),
+				workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
 				workflow.WithBody(map[string]any{
+					"title":   "Notification",
+					"body":    workflow.Interpolate("Processing started for: ", workflow.FieldRef("title")),
 					"message": "Processing started",
-					"dataId":  workflow.FieldRef("data.id"), // ✅ Access nested field
 				}),
 			),
 
@@ -131,14 +136,11 @@ func main() {
 	// VarRef accesses both status variables and exported results from branches
 	completionTask := workflow.HttpCallTask("sendCompletion",
 		workflow.WithHTTPPost(), // Type-safe HTTP method
-		workflow.WithURI("https://api.example.com/completion"),
+		workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
 		workflow.WithBody(map[string]any{
+			"title":  "All Processing Complete",
 			"status": workflow.VarRef("status"), // ✅ Aggregation status
-			"results": map[string]any{
-				"analytics":      workflow.VarRef("analytics"),        // ✅ From analytics branch
-				"validation":     workflow.VarRef("validationResult"), // ✅ From validation branch
-				"transformation": workflow.VarRef("transformed"),      // ✅ From transformation branch
-			},
+			"body":   "All parallel branches completed successfully",
 		}),
 	)
 

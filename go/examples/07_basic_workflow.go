@@ -39,22 +39,23 @@ func main() {
 
 	// Task 1: Initialize variables using type-safe setters
 	initTask := workflow.SetTask("initialize",
-		workflow.SetString("apiURL", "https://api.example.com"),
+		workflow.SetString("apiURL", "https://jsonplaceholder.typicode.com"),
 		workflow.SetInt("retryCount", 0), // Type-safe integer instead of string "0"
 	)
 
 	// Task 2: Fetch data from API using variable interpolation
+	// Using JSONPlaceholder - a free fake REST API for testing and prototyping
 	fetchTask := workflow.HttpCallTask("fetchData",
 		workflow.WithHTTPGet(), // Type-safe HTTP method
-		workflow.WithURI(workflow.Interpolate(workflow.VarRef("apiURL"), "/data")), // Clean interpolation
-		workflow.WithHeader("Authorization", workflow.Interpolate("Bearer ", workflow.VarRef("API_TOKEN"))),
+		workflow.WithURI(workflow.Interpolate(workflow.VarRef("apiURL"), "/posts/1")), // Fetch a real post
 		workflow.WithHeader("Content-Type", "application/json"),
 		workflow.WithTimeout(30),
 	).ExportAll() // High-level helper instead of Export("${.}")
 
 	// Task 3: Process the response using field references
 	processTask := workflow.SetTask("processResponse",
-		workflow.SetVar("dataCount", workflow.FieldRef("count")), // Clean field reference instead of "${.count}"
+		workflow.SetVar("postTitle", workflow.FieldRef("title")), // Extract the post title
+		workflow.SetVar("postBody", workflow.FieldRef("body")),   // Extract the post body
 		workflow.SetString("status", "success"),
 	)
 

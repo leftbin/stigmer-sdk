@@ -36,11 +36,12 @@ func main() {
 	defer stigmeragent.Complete()
 
 	// Task 1: Fetch list of items from API
-	// ExportField("items") extracts the "items" field from response and makes it available to next task
+	// Using JSONPlaceholder - a free fake REST API for testing and prototyping
+	// Fetches an array of posts that we'll iterate over
 	fetchTask := workflow.HttpCallTask("fetchItems",
 		workflow.WithHTTPGet(), // Type-safe HTTP method
-		workflow.WithURI("https://api.example.com/items"),
-	).ExportField("items") // Make items array available for the FOR loop
+		workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
+	).ExportAll() // Make entire response (array of posts) available for the FOR loop
 
 	// Task 2: Initialize counter using type-safe setters
 	initTask := workflow.SetTask("initCounter",
@@ -63,13 +64,13 @@ func main() {
 	// Task 4: Check processing result and route to appropriate counter
 	//
 	// This SWITCH task examines the result of processItem:
-	// - If result.success == "true": increment success counter
+	// - If id exists and is > 0: increment success counter (post was created)
 	// - Otherwise: increment failed counter
 	//
 	// Using type-safe condition builder instead of raw string expression
 	checkResultTask := workflow.SwitchTask("checkResult",
 		workflow.WithCaseRef(
-			workflow.Equals(workflow.Field("result.success"), workflow.Literal("true")),
+			workflow.GreaterThan(workflow.Field("id"), workflow.Number(0)),
 			incrementSuccessTask,
 		),
 		workflow.WithDefaultRef(incrementFailedTask),
@@ -77,17 +78,19 @@ func main() {
 
 	// Task 3: Process each item in a loop using field references and type-safe task references
 	processTask := workflow.ForTask("processEachItem",
-		workflow.WithIn(workflow.FieldRef("items")),
+		workflow.WithIn(workflow.VarRef(".")), // Iterate over the array of posts
 		workflow.WithDo(
 			// Process current item using field references
+			// Creates a new post at JSONPlaceholder API for each item
 			workflow.HttpCallTask("processItem",
 				workflow.WithHTTPPost(), // Type-safe HTTP method
-				workflow.WithURI("https://api.example.com/process"),
+				workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
 				workflow.WithBody(map[string]any{
-					"itemId":   workflow.FieldRef("id"),
-					"itemData": workflow.FieldRef("data"),
+					"title":  workflow.FieldRef("title"),
+					"body":   workflow.FieldRef("body"),
+					"userId": workflow.FieldRef("userId"),
 				}),
-			).ExportField("result").ThenRef(checkResultTask), // Type-safe task linking
+			).ExportField("id").ThenRef(checkResultTask), // Export the created post ID
 
 			checkResultTask,
 			incrementSuccessTask,

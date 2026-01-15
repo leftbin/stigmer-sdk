@@ -44,9 +44,10 @@ func main() {
 	//   - headers: Response headers
 	//
 	// ExportAll() makes all response fields available to subsequent tasks
+	// Using JSONPlaceholder - a free fake REST API for testing and prototyping
 	fetchTask := workflow.HttpCallTask("fetchData",
 		workflow.WithHTTPGet(), // Type-safe HTTP method
-		workflow.WithURI("https://api.example.com/data"),
+		workflow.WithURI("https://jsonplaceholder.typicode.com/posts/1"),
 	).ExportAll() // Export entire response (status, body, headers) to context
 
 	// Define handler tasks first for type-safe references (modern pattern)

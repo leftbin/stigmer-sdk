@@ -56,10 +56,12 @@ func main() {
 	).End()
 
 	// Log error task
+	// Using JSONPlaceholder - a free fake REST API for testing and prototyping
 	logErrorTask := workflow.HttpCallTask("logError",
 		workflow.WithHTTPPost(), // Type-safe HTTP method
-		workflow.WithURI("https://api.example.com/logs"),
+		workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
 		workflow.WithBody(map[string]any{
+			"title":        "Error Log",
 			"errorType":    workflow.VarRef("errorType"),
 			"errorMessage": workflow.VarRef("errorMessage"),
 			"retryCount":   workflow.VarRef("retryCount"),
@@ -83,12 +85,13 @@ func main() {
 
 	// Task 2: Try risky operation with error handling using type-safe error matchers
 	// Now using task references for flow control AND type-safe error matching
+	// Using JSONPlaceholder - a free fake REST API for testing and prototyping
 	attemptDataFetchTask := workflow.TryTask("attemptDataFetch",
 		// Try block - risky operation
 		workflow.WithTry(
 			workflow.HttpCallTask("fetchData",
 				workflow.WithHTTPGet(), // Type-safe HTTP method
-				workflow.WithURI("https://api.example.com/data"),
+				workflow.WithURI("https://jsonplaceholder.typicode.com/posts/1"),
 				workflow.WithTimeout(10),
 			).ExportAll(),
 		),
