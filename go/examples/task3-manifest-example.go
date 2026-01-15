@@ -1,9 +1,9 @@
-// Package examples provides a reference example for Task 3 (Synthesis Architecture)
+// Package main provides a reference example for Task 3 (Synthesis Architecture)
 // showing how to use the Buf-generated manifest proto to convert SDK types to AgentManifest.
 //
 // This file is a REFERENCE ONLY for Task 3 implementation.
 // It will be removed once actual synthesis architecture is implemented.
-package examples
+package main
 
 import (
 	"time"
@@ -119,7 +119,7 @@ func Task3Example() *agentv1.AgentManifest {
 	// Step 3: Create the complete AgentManifest
 	manifest := &agentv1.AgentManifest{
 		SdkMetadata: metadata,
-		Agent:       agent,
+		Agents:      []*agentv1.AgentBlueprint{agent},
 	}
 
 	return manifest

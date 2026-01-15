@@ -232,7 +232,7 @@ func (*HttpCallTaskConfig) isTaskConfig() {}
 // Example:
 //
 //	task := workflow.HttpCallTask("fetchData",
-//	    workflow.WithMethod("GET"),
+//	    workflow.WithHTTPGet(),  // Type-safe HTTP method
 //	    workflow.WithURI("https://api.example.com/data"),
 //	    workflow.WithHeader("Authorization", "Bearer ${TOKEN}"),
 //	)
@@ -257,10 +257,69 @@ func HttpCallTask(name string, opts ...HttpCallTaskOption) *Task {
 // HttpCallTaskOption is a functional option for configuring HTTP_CALL tasks.
 type HttpCallTaskOption func(*HttpCallTaskConfig)
 
-// WithMethod sets the HTTP method.
+// WithMethod sets the HTTP method using a string.
+// For common HTTP methods, prefer using the type-safe helpers:
+// WithHTTPGet(), WithHTTPPost(), WithHTTPPut(), WithHTTPPatch(), WithHTTPDelete(), etc.
+// Use this function for custom or non-standard HTTP methods.
 func WithMethod(method string) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
 		cfg.Method = method
+	}
+}
+
+// WithHTTPGet sets the HTTP method to GET.
+// This is a type-safe helper for the most common HTTP method.
+func WithHTTPGet() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "GET"
+	}
+}
+
+// WithHTTPPost sets the HTTP method to POST.
+// This is a type-safe helper for creating or submitting data.
+func WithHTTPPost() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "POST"
+	}
+}
+
+// WithHTTPPut sets the HTTP method to PUT.
+// This is a type-safe helper for updating or replacing resources.
+func WithHTTPPut() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "PUT"
+	}
+}
+
+// WithHTTPPatch sets the HTTP method to PATCH.
+// This is a type-safe helper for partial updates to resources.
+func WithHTTPPatch() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "PATCH"
+	}
+}
+
+// WithHTTPDelete sets the HTTP method to DELETE.
+// This is a type-safe helper for removing resources.
+func WithHTTPDelete() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "DELETE"
+	}
+}
+
+// WithHTTPHead sets the HTTP method to HEAD.
+// This is a type-safe helper for retrieving headers without body.
+func WithHTTPHead() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "HEAD"
+	}
+}
+
+// WithHTTPOptions sets the HTTP method to OPTIONS.
+// This is a type-safe helper for retrieving allowed methods and CORS.
+func WithHTTPOptions() HttpCallTaskOption {
+	return func(cfg *HttpCallTaskConfig) {
+		cfg.Method = "OPTIONS"
 	}
 }
 
@@ -595,7 +654,7 @@ func (*TryTaskConfig) isTaskConfig() {}
 //
 //	task := workflow.TryTask("handleErrors",
 //	    workflow.WithTry(
-//	        workflow.HttpCallTask("risky", workflow.WithMethod("GET"), workflow.WithURI("${.url}")),
+//	        workflow.HttpCallTask("risky", workflow.WithHTTPGet(), workflow.WithURI("${.url}")),
 //	    ),
 //	    workflow.WithCatch([]string{"NetworkError"}, "err",
 //	        workflow.SetTask("logError", workflow.SetVar("error", "${err}")),

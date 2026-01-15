@@ -8,7 +8,7 @@ help: ## Display this help message
 .PHONY: build
 build: ## Build the SDK
 	@echo "Building SDK..."
-	@go build ./...
+	@go build $(shell go list ./... | grep -v /examples)
 
 .PHONY: test
 test: ## Run all tests

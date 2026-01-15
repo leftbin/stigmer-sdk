@@ -35,7 +35,32 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Create the workflow (version is optional)
+	// Task 1: Initialize variables using type-safe setters
+	initTask := workflow.SetTask("initialize",
+		workflow.SetString("apiURL", "https://api.example.com"),
+		workflow.SetInt("retryCount", 0), // Type-safe integer instead of string "0"
+	)
+
+	// Task 2: Fetch data from API using variable interpolation
+	fetchTask := workflow.HttpCallTask("fetchData",
+		workflow.WithHTTPGet(), // Type-safe HTTP method
+		workflow.WithURI(workflow.Interpolate(workflow.VarRef("apiURL"), "/data")), // Clean interpolation
+		workflow.WithHeader("Authorization", workflow.Interpolate("Bearer ", workflow.VarRef("API_TOKEN"))),
+		workflow.WithHeader("Content-Type", "application/json"),
+		workflow.WithTimeout(30),
+	).ExportAll() // High-level helper instead of Export("${.}")
+
+	// Task 3: Process the response using field references
+	processTask := workflow.SetTask("processResponse",
+		workflow.SetVar("dataCount", workflow.FieldRef("count")), // Clean field reference instead of "${.count}"
+		workflow.SetString("status", "success"),
+	)
+
+	// Connect tasks using type-safe references (refactoring-safe!)
+	initTask.ThenRef(fetchTask)
+	fetchTask.ThenRef(processTask)
+
+	// Create the workflow with tasks (version is optional)
 	wf, err := workflow.New(
 		// Required metadata
 		workflow.WithNamespace("data-processing"),
@@ -46,37 +71,13 @@ func main() {
 		workflow.WithDescription("Fetch data from an external API"),
 		workflow.WithOrg("my-org"),
 		workflow.WithEnvironmentVariable(apiToken),
+
+		// Tasks
+		workflow.WithTasks(initTask, fetchTask, processTask),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// Task 1: Initialize variables using type-safe setters
-	initTask := wf.AddTask(workflow.SetTask("initialize",
-		workflow.SetString("apiURL", "https://api.example.com"),
-		workflow.SetInt("retryCount", 0), // Type-safe integer instead of string "0"
-	))
-
-	// Task 2: Fetch data from API using variable interpolation
-	fetchTask := wf.AddTask(workflow.HttpCallTask("fetchData",
-		workflow.WithMethod("GET"),
-		workflow.WithURI(workflow.Interpolate(workflow.VarRef("apiURL"), "/data")), // Clean interpolation
-		workflow.WithHeader("Authorization", workflow.Interpolate("Bearer ", workflow.VarRef("API_TOKEN"))),
-		workflow.WithHeader("Content-Type", "application/json"),
-		workflow.WithTimeout(30),
-	).ExportAll()) // High-level helper instead of Export("${.}")
-
-	// Connect tasks using type-safe references (refactoring-safe!)
-	initTask.ThenRef(fetchTask)
-
-	// Task 3: Process the response using field references
-	processTask := wf.AddTask(workflow.SetTask("processResponse",
-		workflow.SetVar("dataCount", workflow.FieldRef("count")), // Clean field reference instead of "${.count}"
-		workflow.SetString("status", "success"),
-	))
-
-	// Connect fetch → process
-	fetchTask.ThenRef(processTask)
 
 	log.Printf("Created workflow: %s", wf)
 	log.Println("Workflow will be written to manifest.pb on exit")

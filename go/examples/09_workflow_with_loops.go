@@ -30,7 +30,7 @@ func main() {
 
 	// Task 1: Fetch list of items using high-level helper
 	wf.AddTask(workflow.HttpCallTask("fetchItems",
-		workflow.WithMethod("GET"),
+		workflow.WithHTTPGet(), // Type-safe HTTP method
 		workflow.WithURI("https://api.example.com/items"),
 	).ExportField("items"))
 
@@ -46,7 +46,7 @@ func main() {
 		workflow.WithDo(
 			// Process current item using field references
 			workflow.HttpCallTask("processItem",
-				workflow.WithMethod("POST"),
+				workflow.WithHTTPPost(), // Type-safe HTTP method
 				workflow.WithURI("https://api.example.com/process"),
 				workflow.WithBody(map[string]any{
 					"itemId":   workflow.FieldRef("id"),

@@ -30,7 +30,7 @@ func main() {
 
 	// Task 1: Fetch data to process using high-level helper
 	wf.AddTask(workflow.HttpCallTask("fetchData",
-		workflow.WithMethod("GET"),
+		workflow.WithHTTPGet(), // Type-safe HTTP method
 		workflow.WithURI("https://api.example.com/data"),
 	).ExportAll())
 
@@ -39,7 +39,7 @@ func main() {
 		// Branch 1: Process analytics
 		workflow.WithBranch("analytics",
 			workflow.HttpCallTask("computeAnalytics",
-				workflow.WithMethod("POST"),
+				workflow.WithHTTPPost(), // Type-safe HTTP method
 				workflow.WithURI("https://api.example.com/analytics"),
 				workflow.WithBody(map[string]any{
 					"data": workflow.FieldRef("data"),
@@ -55,7 +55,7 @@ func main() {
 		// Branch 2: Process validation
 		workflow.WithBranch("validation",
 			workflow.HttpCallTask("validateData",
-				workflow.WithMethod("POST"),
+				workflow.WithHTTPPost(), // Type-safe HTTP method
 				workflow.WithURI("https://api.example.com/validate"),
 				workflow.WithBody(map[string]any{
 					"data": workflow.FieldRef("data"),
@@ -70,7 +70,7 @@ func main() {
 		// Branch 3: Process transformation
 		workflow.WithBranch("transformation",
 			workflow.HttpCallTask("transformData",
-				workflow.WithMethod("POST"),
+				workflow.WithHTTPPost(), // Type-safe HTTP method
 				workflow.WithURI("https://api.example.com/transform"),
 				workflow.WithBody(map[string]any{
 					"data":   workflow.FieldRef("data"),
@@ -86,7 +86,7 @@ func main() {
 		// Branch 4: Process notification
 		workflow.WithBranch("notification",
 			workflow.HttpCallTask("sendNotification",
-				workflow.WithMethod("POST"),
+				workflow.WithHTTPPost(), // Type-safe HTTP method
 				workflow.WithURI("https://api.example.com/notify"),
 				workflow.WithBody(map[string]any{
 					"message": "Processing started",
@@ -111,7 +111,7 @@ func main() {
 
 	// Task 4: Send completion notification using variable references
 	wf.AddTask(workflow.HttpCallTask("sendCompletion",
-		workflow.WithMethod("POST"),
+		workflow.WithHTTPPost(), // Type-safe HTTP method
 		workflow.WithURI("https://api.example.com/completion"),
 		workflow.WithBody(map[string]any{
 			"status": workflow.VarRef("status"),

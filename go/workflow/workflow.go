@@ -192,7 +192,7 @@ func WithTask(task *Task) Option {
 //
 //	workflow.WithTasks(
 //	    workflow.SetTask("init", workflow.SetVar("x", "1")),
-//	    workflow.HttpCallTask("fetch", workflow.WithMethod("GET"), workflow.WithURI("${.url}")),
+//	    workflow.HttpCallTask("fetch", workflow.WithHTTPGet(), workflow.WithURI("${.url}")),
 //	)
 func WithTasks(tasks ...*Task) Option {
 	return func(w *Workflow) error {
@@ -253,7 +253,7 @@ func (w *Workflow) AddTask(task *Task) *Workflow {
 //	wf, _ := workflow.New(...)
 //	wf.AddTasks(
 //	    workflow.SetTask("init", workflow.SetVar("x", "1")),
-//	    workflow.HttpCallTask("fetch", workflow.WithMethod("GET"), workflow.WithURI("${.url}")),
+//	    workflow.HttpCallTask("fetch", workflow.WithHTTPGet(), workflow.WithURI("${.url}")),
 //	)
 func (w *Workflow) AddTasks(tasks ...*Task) *Workflow {
 	w.Tasks = append(w.Tasks, tasks...)

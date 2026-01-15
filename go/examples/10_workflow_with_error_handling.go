@@ -39,7 +39,7 @@ func main() {
 		// Try block - risky operation
 		workflow.WithTry(
 			workflow.HttpCallTask("fetchData",
-				workflow.WithMethod("GET"),
+				workflow.WithHTTPGet(), // Type-safe HTTP method
 				workflow.WithURI("https://api.example.com/data"),
 				workflow.WithTimeout(10),
 			).ExportAll(),
@@ -97,7 +97,7 @@ func main() {
 
 	// Task 6: Log error using variable references
 	wf.AddTask(workflow.HttpCallTask("logError",
-		workflow.WithMethod("POST"),
+		workflow.WithHTTPPost(), // Type-safe HTTP method
 		workflow.WithURI("https://api.example.com/logs"),
 		workflow.WithBody(map[string]any{
 			"errorType":    workflow.VarRef("errorType"),
