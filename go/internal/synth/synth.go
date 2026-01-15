@@ -79,33 +79,33 @@ func autoSynth() {
 
 	// Synthesis mode: Output directory is set
 
-	// Get all registered agents from global registry
+	// Get all registered resources from global registry
 	agentInterfaces := registry.Global().GetAgents()
-	if len(agentInterfaces) == 0 {
-		fmt.Println("⚠ Stigmer SDK: No agents defined. Nothing to synthesize.")
+	workflowInterfaces := registry.Global().GetWorkflows()
+
+	if len(agentInterfaces) == 0 && len(workflowInterfaces) == 0 {
+		fmt.Println("⚠ Stigmer SDK: No agents or workflows defined. Nothing to synthesize.")
 		return
 	}
 
-	agentCount := len(agentInterfaces)
-	if agentCount == 1 {
-		fmt.Println("→ Stigmer SDK: Synthesizing manifest for 1 agent...")
-	} else {
-		fmt.Printf("→ Stigmer SDK: Synthesizing manifest for %d agents...\n", agentCount)
+	// Report what we're synthesizing
+	var parts []string
+	if len(agentInterfaces) > 0 {
+		if len(agentInterfaces) == 1 {
+			parts = append(parts, "1 agent")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d agents", len(agentInterfaces)))
+		}
+	}
+	if len(workflowInterfaces) > 0 {
+		if len(workflowInterfaces) == 1 {
+			parts = append(parts, "1 workflow")
+		} else {
+			parts = append(parts, fmt.Sprintf("%d workflows", len(workflowInterfaces)))
+		}
 	}
 
-	// Convert all SDK agents to manifest proto
-	manifest, err := ToManifest(agentInterfaces...)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "✗ Stigmer SDK: Synthesis failed: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Serialize to binary protobuf
-	data, err := proto.Marshal(manifest)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "✗ Stigmer SDK: Failed to serialize manifest: %v\n", err)
-		os.Exit(1)
-	}
+	fmt.Printf("→ Stigmer SDK: Synthesizing manifest for %s...\n", joinParts(parts))
 
 	// Ensure output directory exists
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -113,14 +113,69 @@ func autoSynth() {
 		os.Exit(1)
 	}
 
-	// Write manifest.pb to output directory
-	manifestPath := filepath.Join(outputDir, "manifest.pb")
-	if err := os.WriteFile(manifestPath, data, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "✗ Stigmer SDK: Failed to write manifest: %v\n", err)
-		os.Exit(1)
+	// Synthesize agents if any exist
+	if len(agentInterfaces) > 0 {
+		agentManifest, err := ToManifest(agentInterfaces...)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ Stigmer SDK: Agent synthesis failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Serialize to binary protobuf
+		data, err := proto.Marshal(agentManifest)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ Stigmer SDK: Failed to serialize agent manifest: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Write agent manifest.pb to output directory
+		agentManifestPath := filepath.Join(outputDir, "agent-manifest.pb")
+		if err := os.WriteFile(agentManifestPath, data, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ Stigmer SDK: Failed to write agent manifest: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("✓ Stigmer SDK: Agent manifest written to: %s\n", agentManifestPath)
 	}
 
-	fmt.Printf("✓ Stigmer SDK: Manifest written to: %s\n", manifestPath)
+	// Synthesize workflows if any exist
+	if len(workflowInterfaces) > 0 {
+		workflowManifest, err := ToWorkflowManifest(workflowInterfaces...)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ Stigmer SDK: Workflow synthesis failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Serialize to binary protobuf
+		data, err := proto.Marshal(workflowManifest)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ Stigmer SDK: Failed to serialize workflow manifest: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Write workflow manifest.pb to output directory
+		workflowManifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+		if err := os.WriteFile(workflowManifestPath, data, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ Stigmer SDK: Failed to write workflow manifest: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("✓ Stigmer SDK: Workflow manifest written to: %s\n", workflowManifestPath)
+	}
+}
+
+// joinParts joins string parts with commas and "and" before the last item.
+func joinParts(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	if len(parts) == 2 {
+		return parts[0] + " and " + parts[1]
+	}
+	return parts[0] + " and " + parts[1]
 }
 
 // AutoSynth performs automatic manifest synthesis based on the STIGMER_OUT_DIR environment variable.
