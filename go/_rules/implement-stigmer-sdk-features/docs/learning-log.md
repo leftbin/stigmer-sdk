@@ -17,6 +17,261 @@ This log captures all learnings, discoveries, and solutions from implementing an
 
 ---
 
+## Workflow SDK Implementation
+
+**Topic Coverage**: Workflow package architecture, task builders, multi-layer validation, fluent API patterns
+
+### 2026-01-15 - Complete Workflow SDK with 12 Task Types
+
+**Problem**: Need to implement workflow support in Go SDK following same patterns as agent package, covering all 12 Zigflow DSL task types.
+
+**Root Cause**: 
+- Workflow proto designed with structured task definitions
+- Need type-safe Go API for creating workflows
+- Must support all task types (SET, HTTP_CALL, GRPC_CALL, SWITCH, FOR, FORK, TRY, LISTEN, WAIT, CALL_ACTIVITY, RAISE, RUN)
+- Need comprehensive validation for each task type
+
+**Solution**: Created complete workflow package with task builder patterns
+
+**Implementation in Go**:
+
+```go
+// Package structure
+workflow/
+├── workflow.go      // Main Workflow struct with builder pattern
+├── task.go          // 12 task type builders
+├── document.go      // Document metadata validation
+├── validation.go    // Multi-layer validation
+├── errors.go        // Error types with context
+└── doc.go          // Package documentation
+
+// Workflow creation with builder pattern
+workflow, err := workflow.New(
+    workflow.WithNamespace("my-org"),
+    workflow.WithName("data-pipeline"),
+    workflow.WithVersion("1.0.0"),
+)
+
+// Task builders for all 12 types
+wf.AddTask(workflow.SetTask("init",
+    workflow.SetVar("x", "1"),
+))
+
+wf.AddTask(workflow.HttpCallTask("fetch",
+    workflow.WithMethod("GET"),
+    workflow.WithURI("${.url}"),
+))
+
+// Fluent API for flow control
+task.Export("${.}").Then("nextTask")
+```
+
+**Pattern Discovered**: Task Config Marker Interface
+```go
+type TaskConfig interface {
+    isTaskConfig()
+}
+
+// Each task type implements this marker
+type SetTaskConfig struct {
+    Variables map[string]string
+}
+func (*SetTaskConfig) isTaskConfig() {}
+```
+
+**Benefits**:
+- Type safety at compile time
+- Clean separation of task types
+- Extensible for new task types
+- IDE autocomplete support
+
+**Validation Strategy**:
+Multi-layer validation approach:
+1. **Document validation** - namespace, name, version (semver)
+2. **Workflow validation** - must have at least one task
+3. **Task validation** - unique names, valid kind
+4. **Task-specific config validation** - validates based on task type
+
+```go
+// Example task-specific validation
+func validateHttpCallTaskConfig(task *Task) error {
+    cfg, ok := task.Config.(*HttpCallTaskConfig)
+    if !ok {
+        return NewValidationErrorWithCause(...)
+    }
+    if cfg.Method == "" {
+        return NewValidationErrorWithCause(...)
+    }
+    // Validate method is one of: GET, POST, PUT, DELETE, PATCH
+    // ...
+}
+```
+
+**Prevention**:
+- Use marker interface pattern for type-safe task configs
+- Implement multi-layer validation (not just one level)
+- Create task-specific validation functions
+- Provide clear error messages with context
+
+**Cross-Language Reference**: Python SDK would use dataclasses + Union types for task configs
+
+---
+
+### 2026-01-15 - Fluent API Pattern for Flow Control
+
+**Problem**: Need intuitive way to specify task export and flow control without verbose method calls.
+
+**Root Cause**:
+- Tasks need to export outputs: `export: { as: "${.}" }`
+- Tasks need flow control: `then: "nextTask"`
+- Want readable, chainable API
+
+**Solution**: Implement fluent API with method chaining on Task
+
+**Implementation in Go**:
+
+```go
+// Task struct with fluent methods
+type Task struct {
+    Name     string
+    Kind     TaskKind
+    Config   TaskConfig
+    ExportAs string
+    ThenTask string
+}
+
+// Fluent methods return *Task for chaining
+func (t *Task) Export(expr string) *Task {
+    t.ExportAs = expr
+    return t
+}
+
+func (t *Task) Then(taskName string) *Task {
+    t.ThenTask = taskName
+    return t
+}
+
+func (t *Task) End() *Task {
+    t.ThenTask = "end"
+    return t
+}
+
+// Usage - clean and readable
+wf.AddTask(workflow.HttpCallTask("fetch",
+    workflow.WithMethod("GET"),
+    workflow.WithURI("${.url}"),
+).Export("${.}").Then("process"))
+```
+
+**Benefits**:
+- Readable API that matches YAML structure
+- Method chaining reduces verbosity
+- Type-safe (returns *Task)
+- IDE autocomplete works perfectly
+
+**Pattern**: Method chaining on struct pointer receivers
+```go
+func (t *Task) Method() *Task {
+    // modify t
+    return t
+}
+```
+
+**Prevention**:
+- Use pointer receivers for methods that modify state
+- Return the pointer to enable chaining
+- Keep methods simple and focused
+
+**Cross-Language Reference**: Python SDK would use method chaining on dataclass methods
+
+---
+
+### 2026-01-15 - Task-Specific Validation with Type Assertions
+
+**Problem**: Each of the 12 task types has different configuration requirements that need validation.
+
+**Root Cause**:
+- Task.Config is interface{} (TaskConfig marker interface)
+- Need to validate based on specific task type
+- Each task has unique validation rules
+
+**Solution**: Type assertion in validation functions per task type
+
+**Implementation in Go**:
+
+```go
+func validateTaskConfig(task *Task) error {
+    switch task.Kind {
+    case TaskKindSet:
+        return validateSetTaskConfig(task)
+    case TaskKindHttpCall:
+        return validateHttpCallTaskConfig(task)
+    // ... other task types
+    default:
+        return NewValidationErrorWithCause(...)
+    }
+}
+
+func validateHttpCallTaskConfig(task *Task) error {
+    cfg, ok := task.Config.(*HttpCallTaskConfig)
+    if !ok {
+        return NewValidationErrorWithCause(
+            "config", "", "type",
+            "invalid config type for HTTP_CALL task",
+            ErrInvalidTaskConfig,
+        )
+    }
+    
+    if cfg.Method == "" {
+        return NewValidationErrorWithCause(
+            "config.method", "", "required",
+            "HTTP_CALL task must have a method",
+            ErrInvalidTaskConfig,
+        )
+    }
+    
+    // Validate method is one of: GET, POST, PUT, DELETE, PATCH
+    validMethods := map[string]bool{
+        "GET": true, "POST": true, "PUT": true, 
+        "DELETE": true, "PATCH": true,
+    }
+    if !validMethods[cfg.Method] {
+        return NewValidationErrorWithCause(
+            "config.method", cfg.Method, "enum",
+            "HTTP method must be one of: GET, POST, PUT, DELETE, PATCH",
+            ErrInvalidTaskConfig,
+        )
+    }
+    
+    return nil
+}
+```
+
+**Pattern**: Type assertion with ok check
+```go
+cfg, ok := task.Config.(*ConcreteType)
+if !ok {
+    return error
+}
+// use cfg safely
+```
+
+**Benefits**:
+- Type-safe validation
+- Clear error messages
+- Each task type validated independently
+- Extensible for new task types
+
+**Prevention**:
+- Always use `, ok` pattern for type assertions
+- Return clear error if type assertion fails
+- Keep validation functions focused on one task type
+- Use map for enum validation (not if/else chains)
+
+**Cross-Language Reference**: Python SDK would use `isinstance()` checks and pattern matching (Python 3.10+)
+
+---
+
 ## Proto Converters & Transformations
 
 **Topic Coverage**: Proto message conversions, pointer handling, nil checks, nested messages, repeated fields
@@ -993,6 +1248,117 @@ find docs/ -name '*[A-Z]*' -type f
 ```
 
 **Cross-Project Reference**: All Stigmer projects follow same standards
+
+---
+
+### 2026-01-15 - Registry Integration for Multiple Resource Types
+
+**Problem**: Registry initially supported only agents, but workflow SDK needed similar registration pattern for workflows.
+
+**Root Cause**:
+- Registry designed for single resource type (agents)
+- Adding workflows required extending registry interface
+- Need to support both agents and workflows without breaking existing code
+
+**Solution**: Extend registry with parallel workflow methods
+
+**Implementation in Go**:
+
+```go
+// Registry struct extended to support workflows
+type Registry struct {
+    mu        sync.RWMutex
+    agents    []interface{} // Agents
+    workflows []interface{} // Workflows - added parallel field
+}
+
+// Parallel methods for workflows
+func (r *Registry) RegisterWorkflow(w interface{}) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    r.workflows = append(r.workflows, w)
+}
+
+func (r *Registry) GetWorkflows() []interface{} {
+    r.mu.RLock()
+    defer r.mu.RUnlock()
+    result := make([]interface{}, len(r.workflows))
+    copy(result, r.workflows)
+    return result
+}
+
+// Helper methods
+func (r *Registry) HasAny() bool {
+    r.mu.RLock()
+    defer r.mu.RUnlock()
+    return len(r.agents) > 0 || len(r.workflows) > 0
+}
+
+// Updated Clear() to handle both
+func (r *Registry) Clear() {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    r.agents = nil
+    r.workflows = nil
+}
+```
+
+**Pattern**: Parallel fields for multiple resource types
+```go
+type Registry struct {
+    mu        sync.RWMutex
+    agents    []interface{}
+    workflows []interface{}
+    // skills []interface{} - future
+}
+```
+
+**Benefits**:
+- Backward compatible (existing agent methods unchanged)
+- Type safety (each resource type separate)
+- Clean separation of concerns
+- Easy to add more resource types
+
+**Prevention**:
+- Don't use single `resources []interface{}` with type checking
+- Use parallel fields for type safety
+- Provide helper methods (HasAny, Clear, etc.)
+- Maintain thread safety with RWMutex
+
+**Synthesis Integration**:
+Updated synthesis to handle both resource types:
+
+```go
+func autoSynth() {
+    agentInterfaces := registry.Global().GetAgents()
+    workflowInterfaces := registry.Global().GetWorkflows()
+
+    if len(agentInterfaces) == 0 && len(workflowInterfaces) == 0 {
+        fmt.Println("⚠ No agents or workflows defined.")
+        return
+    }
+
+    // Synthesize agents
+    if len(agentInterfaces) > 0 {
+        agentManifest, _ := ToManifest(agentInterfaces...)
+        // Write agent-manifest.pb
+    }
+
+    // Synthesize workflows
+    if len(workflowInterfaces) > 0 {
+        workflowManifest, _ := ToWorkflowManifest(workflowInterfaces...)
+        // Write workflow-manifest.pb
+    }
+}
+```
+
+**Prevention**:
+- Check for empty slices before synthesis
+- Generate separate manifest files (agent-manifest.pb, workflow-manifest.pb)
+- Report combined status to user
+- Handle synthesis errors gracefully
+
+**Cross-Language Reference**: Python SDK registry would use similar parallel list pattern
 
 ---
 
