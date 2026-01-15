@@ -2721,6 +2721,198 @@ go run examples/07_basic_workflow.go
 - **Go approach**: Requires explicit build exclusion
 - **Reusable concept**: Separation of buildable packages vs runnable examples
 
+### 2026-01-15 - Example 09 API Modernization: String-Based to Type-Safe References
+
+**Problem**: Example 09 (workflow with loops) used older API patterns with string-based task references and raw expression syntax, while Example 08 demonstrated modern type-safe patterns with condition builders.
+
+**Root Cause**:
+- Example 09 written before type-safe task reference system was fully established
+- Used `WithCase("${.result.success}", "incrementSuccess")` - string condition + string task name
+- Used `WithDefault("incrementFailed")` - string-based task reference
+- Used `.Then("end")` - magic string for flow control
+- No condition builders, just raw expression syntax
+
+**User Discovery**:
+User correctly identified the inconsistency:
+> "In this example, I still see that with case and with default are we still supporting that? I know we have with case ref with case default ref and all and the condition also we used to do we have done it differently in workflow with conditions but I want to understand it here how is it done? I still see some like SetTask also, or is it that the 09 example is a bit old?"
+
+This revealed that while both APIs are supported for backward compatibility, the examples should demonstrate the **preferred, modern approach**.
+
+**Solution**: Update Example 09 to use modern API patterns matching Example 08
+
+**Implementation in Go**:
+
+```go
+// ❌ OLD STYLE (Example 09 before):
+wf.AddTask(workflow.SwitchTask("checkResult",
+    workflow.WithCase("${.result.success}", "incrementSuccess"),  // String expression + string task name
+    workflow.WithDefault("incrementFailed"),                       // String task name
+))
+
+workflow.SetTask("incrementSuccess",
+    workflow.SetVar("processedCount", "${processedCount + 1}"),
+).Then("end")  // Magic string
+
+// ✅ NEW STYLE (Example 09 after):
+// Step 1: Define tasks first for type-safe references
+incrementSuccessTask := workflow.SetTask("incrementSuccess",
+    workflow.SetVar("processedCount", "${processedCount + 1}"),
+).End()  // Explicit termination
+
+incrementFailedTask := workflow.SetTask("incrementFailed",
+    workflow.SetVar("failedCount", "${failedCount + 1}"),
+).End()
+
+// Step 2: Use condition builders and task references
+checkResultTask := workflow.SwitchTask("checkResult",
+    workflow.WithCaseRef(
+        workflow.Equals(workflow.Field("result.success"), workflow.Literal("true")),  // Condition builder
+        incrementSuccessTask,  // Task reference (type-safe!)
+    ),
+    workflow.WithDefaultRef(incrementFailedTask),  // Task reference (type-safe!)
+)
+```
+
+**API Evolution Summary**:
+
+| Aspect | Old API (Deprecated but Supported) | New API (Preferred) |
+|--------|-----------------------------------|---------------------|
+| **Condition syntax** | Raw strings: `"${.result.success}"` | Builders: `Equals(Field("result.success"), Literal("true"))` |
+| **Task references** | Strings: `"incrementSuccess"` | References: `incrementSuccessTask` |
+| **Flow control** | `.Then("end")` magic string | `.End()` explicit method or `.ThenRef(task)` |
+| **Case branches** | `WithCase(cond, "taskName")` | `WithCaseRef(cond, taskRef)` |
+| **Default branch** | `WithDefault("taskName")` | `WithDefaultRef(taskRef)` |
+
+**Condition Builder Functions Available**:
+
+```go
+// Comparison builders
+workflow.Equals(left, right)              // ${left == right}
+workflow.NotEquals(left, right)           // ${left != right}
+workflow.GreaterThan(left, right)         // ${left > right}
+workflow.GreaterThanOrEqual(left, right)  // ${left >= right}
+workflow.LessThan(left, right)            // ${left < right}
+workflow.LessThanOrEqual(left, right)     // ${left <= right}
+
+// Logical builders
+workflow.And(conditions...)               // ${cond1 && cond2 && ...}
+workflow.Or(conditions...)                // ${cond1 || cond2 || ...}
+workflow.Not(condition)                   // ${!(condition)}
+
+// Value builders
+workflow.Field("path")                    // .path (field access)
+workflow.Var("varName")                   // varName (variable access)
+workflow.Number(123)                      // 123 (numeric literal)
+workflow.Literal("value")                 // "value" (string literal)
+```
+
+**Benefits of Modern API**:
+
+| Benefit | Description | Example Impact |
+|---------|-------------|----------------|
+| **Refactoring-safe** | Rename task → all references update automatically | IDE refactor works across 100+ task references |
+| **IDE autocomplete** | Shows available task variables | Type `checkResult` → IDE suggests `checkResultTask` |
+| **Compile-time validation** | Typos caught before runtime | `incrementSucces` → compile error (not runtime) |
+| **Self-documenting** | Condition builders explain intent | `Equals()` clearer than `${==}` |
+| **Type-safe** | Can't reference non-existent tasks | Compiler enforces task existence |
+
+**Pattern**: Define → Reference → Connect
+
+```go
+// Step 1: Define all tasks (capture references)
+task1 := workflow.SetTask(...)
+task2 := workflow.HttpCallTask(...)
+task3 := workflow.SwitchTask(...)
+
+// Step 2: Connect tasks using references
+task1.ThenRef(task2)
+task2.ThenRef(task3)
+
+// Step 3: Add all to workflow
+wf.AddTask(task1).AddTask(task2).AddTask(task3)
+```
+
+**When Each API Is Appropriate**:
+
+| Use Case | String-Based API | Type-Safe API |
+|----------|------------------|---------------|
+| **Prototyping** | ✅ Quick and simple | ⚠️ More verbose |
+| **Small workflows (<5 tasks)** | ✅ Acceptable | ✅ Preferred |
+| **Large workflows (10+ tasks)** | ❌ Error-prone | ✅ **Required** |
+| **Production code** | ⚠️ Risky | ✅ **Required** |
+| **Refactoring-heavy projects** | ❌ Breaks easily | ✅ **Required** |
+| **Team collaboration** | ⚠️ Typo risk | ✅ **Required** |
+
+**Backward Compatibility**:
+Both APIs remain supported:
+
+```go
+// ✅ Old API still works (backward compatible)
+workflow.SwitchTask("check",
+    workflow.WithCase("${.status == 200}", "success"),
+    workflow.WithDefault("error"),
+)
+
+// ✅ New API recommended (type-safe)
+workflow.SwitchTask("check",
+    workflow.WithCaseRef(workflow.Equals(workflow.Field("status"), workflow.Number(200)), successTask),
+    workflow.WithDefaultRef(errorTask),
+)
+
+// ✅ Can even mix (but discouraged)
+workflow.SwitchTask("check",
+    workflow.WithCaseRef(condition, taskRef),  // Type-safe case
+    workflow.WithDefault("error"),              // String-based default
+)
+```
+
+**Files Updated (Example 09)**:
+- Updated header comments to explain modern patterns
+- Replaced `WithCase()` with `WithCaseRef()` + condition builders
+- Replaced `WithDefault()` with `WithDefaultRef()`
+- Replaced `.Then("end")` with `.End()`
+- Added detailed comments explaining condition builder usage
+- Showed "define first, reference later" pattern
+
+**Testing**:
+```bash
+# Verify updated example compiles
+go build ./examples/09_workflow_with_loops.go
+# Result: Success (compiles cleanly)
+
+# Verify example runs
+go run examples/09_workflow_with_loops.go
+# Result: Workflow created with type-safe references
+```
+
+**Impact**:
+- ✅ All 11 SDK examples now demonstrate modern patterns consistently
+- ✅ Example 08 and 09 align on type-safe approach
+- ✅ Users see best practices in examples
+- ✅ Backward compatibility maintained for existing code
+
+**Prevention**:
+- Review all examples when API patterns evolve
+- Keep examples aligned with preferred patterns
+- Document both old and new approaches
+- Show migration path in comments
+- Mark deprecated patterns clearly
+
+**Design Principle**: **Examples as Living Documentation**
+
+Examples should demonstrate:
+1. **Current best practices** - not just "working code"
+2. **Type-safe patterns** - prefer compile-time safety
+3. **Refactoring-friendly** - show patterns that scale
+4. **Self-documenting** - clear intent over brevity
+5. **Consistent style** - all examples follow same patterns
+
+**Cross-Language Reference**:
+- **Python approach**: Similar evolution possible with type hints and references
+- **Go approach**: Leverage compiler for type safety
+- **Reusable concept**: Evolve examples alongside API improvements
+- **Apply to Python SDK**: Review examples for consistency with latest API
+
 ---
 
 ## Future Topics
