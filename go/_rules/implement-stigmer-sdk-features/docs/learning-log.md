@@ -2898,6 +2898,286 @@ go run examples/09_workflow_with_loops.go
 - Show migration path in comments
 - Mark deprecated patterns clearly
 
+---
+
+### 2026-01-15 - Example 10 API Modernization: Error Handling with Type-Safe Patterns
+
+**Problem**: Example 10 (workflow with error handling) used older API patterns with string-based task references and raw expression syntax in error flows, while Examples 08 and 09 demonstrated modern type-safe patterns.
+
+**Root Cause**:
+- Example 10 written before type-safe task reference system was fully established
+- Used `WithCase("${shouldRetry && retryCount < maxRetries}", "retry")` - raw expression string + string task name
+- Used `WithDefault("logError")` - string-based task reference
+- Used `.Then("checkRetry")` in error handlers - magic strings for flow control
+- No condition builders for complex retry logic
+- Critical example (error handling) should showcase best practices
+
+**Context**:
+Following successful modernization of Example 09, Example 10 became the next target. Error handling workflows are particularly important because:
+1. They run during incidents (need reliability)
+2. Often modified under pressure (need refactoring safety)
+3. Critical for production systems (need type safety)
+4. Complex flows (retry loops, multiple error paths)
+
+**Solution**: Update Example 10 to use modern API patterns with emphasis on error handling flows
+
+**Implementation in Go**:
+
+```go
+// ❌ OLD STYLE (Example 10 before):
+wf.AddTask(workflow.TryTask("attemptDataFetch",
+    workflow.WithCatch(
+        []string{"NetworkError"},
+        "networkErr",
+        workflow.SetTask("handleNetworkError", ...)
+            .Then("checkRetry"),  // String-based flow
+    ),
+))
+
+wf.AddTask(workflow.SwitchTask("checkRetry",
+    workflow.WithCase("${shouldRetry && retryCount < maxRetries}", "retry"),  // Raw expression
+    workflow.WithDefault("logError"),  // String reference
+))
+
+workflow.SetTask("retry", ...).Then("waitBeforeRetry")  // String chain
+
+// ✅ NEW STYLE (Example 10 after):
+// Step 1: Define tasks first for type-safe references (handles forward refs)
+retryTask := workflow.SetTask("retry", ...).End()
+waitBeforeRetryTask := workflow.WaitTask("waitBeforeRetry", ...).End()
+logErrorTask := workflow.HttpCallTask("logError", ...).End()
+
+// Step 2: Use condition builders for complex retry logic
+checkRetryTask := workflow.SwitchTask("checkRetry",
+    workflow.WithCaseRef(
+        workflow.And(                                      // Logical composition
+            workflow.Field("shouldRetry"),                 // Boolean check
+            workflow.LessThan(                            // Numeric comparison
+                workflow.Field("retryCount"), 
+                workflow.Field("maxRetries"),
+            ),
+        ),
+        retryTask,  // Type-safe reference
+    ),
+    workflow.WithDefaultRef(logErrorTask),  // Type-safe reference
+).End()
+
+// Step 3: Connect error handlers with type-safe references
+attemptDataFetchTask := workflow.TryTask("attemptDataFetch",
+    workflow.WithCatch(
+        []string{"NetworkError"},
+        "networkErr",
+        workflow.SetTask("handleNetworkError", ...)
+            .ThenRef(checkRetryTask),  // Type-safe flow
+    ),
+).End()
+
+// Step 4: Connect circular retry flow after all tasks defined
+retryTask.ThenRef(waitBeforeRetryTask)
+waitBeforeRetryTask.ThenRef(attemptDataFetchTask)  // Circular reference
+```
+
+**Complex Condition Composition**:
+
+The retry logic demonstrates advanced condition builder usage:
+
+```go
+// Old: Raw expression with multiple operators
+"${shouldRetry && retryCount < maxRetries}"
+
+// New: Composable condition builders
+workflow.And(
+    workflow.Field("shouldRetry"),                                   // Boolean field
+    workflow.LessThan(workflow.Field("retryCount"), workflow.Field("maxRetries")), // Numeric comparison
+)
+```
+
+**Benefits**:
+- `And()` shows logical composition clearly
+- `LessThan()` makes comparison operator explicit
+- `Field()` shows which variables are accessed
+- Each part can be extracted to variable for testing
+- IDE shows types and provides autocomplete
+
+**Circular Reference Pattern**:
+
+Error handling with retry loops requires careful handling of circular flows:
+
+```go
+// Pattern for circular references:
+// 1. Define all tasks with .End() (get references without connecting)
+taskA := workflow.SetTask("a", ...).End()
+taskB := workflow.SetTask("b", ...).End()
+taskC := workflow.SetTask("c", ...).End()
+
+// 2. Connect circular flows after all tasks exist
+taskA.ThenRef(taskB)
+taskB.ThenRef(taskC)
+taskC.ThenRef(taskA)  // Circular reference works because all tasks defined
+```
+
+This pattern is essential for:
+- Retry loops (task → wait → original task)
+- State machines (task → check → back to task)
+- Error recovery flows (attempt → fail → retry → attempt)
+
+**Error Handler Flow Modernization**:
+
+All error catch blocks now use type-safe flow control:
+
+```go
+// Network error handler
+workflow.WithCatch(
+    []string{"NetworkError", "TimeoutError"},
+    "networkErr",
+    workflow.SetTask("handleNetworkError", ...)
+        .ThenRef(checkRetryTask),  // ✅ Type-safe, refactoring-safe
+)
+
+// Validation error handler
+workflow.WithCatch(
+    []string{"ValidationError"},
+    "validationErr",
+    workflow.SetTask("handleValidationError", ...)
+        .ThenRef(logErrorTask),  // ✅ Type-safe, refactoring-safe
+)
+
+// Catch-all error handler
+workflow.WithCatch(
+    []string{"*"},
+    "err",
+    workflow.SetTask("handleUnknownError", ...)
+        .ThenRef(logErrorTask),  // ✅ Type-safe, refactoring-safe
+)
+```
+
+**API Evolution for Error Handling**:
+
+| Aspect | Old API | New API | Error Handling Benefit |
+|--------|---------|---------|----------------------|
+| **Retry condition** | `"${shouldRetry && retryCount < maxRetries}"` | `And(Field("shouldRetry"), LessThan(...))` | Clear retry logic during incidents |
+| **Error handler flow** | `.Then("checkRetry")` | `.ThenRef(checkRetryTask)` | Refactor error paths safely |
+| **Retry loop** | `.Then("waitBeforeRetry")` | `.ThenRef(waitBeforeRetryTask)` | IDE tracks retry flow |
+| **Fallback flow** | `WithDefault("logError")` | `WithDefaultRef(logErrorTask)` | Type-safe fallback paths |
+
+**Why This Matters for Error Handling**:
+
+Error handling code is:
+1. **Modified under pressure**: During incidents, engineers refactor error paths
+2. **Critical for reliability**: Bugs in error handlers cause cascading failures
+3. **Complex**: Multiple error types, retry logic, fallbacks
+4. **Hard to test**: Error paths less frequently exercised
+
+Type-safe references provide **safety when it matters most**.
+
+**Condition Builders for Production**:
+
+The example now demonstrates all key condition builders:
+
+```go
+// Comparison operators
+workflow.LessThan(workflow.Field("retryCount"), workflow.Field("maxRetries"))
+workflow.Equals(workflow.Field("status"), workflow.Number(200))
+
+// Logical operators
+workflow.And(condition1, condition2)        // Both must be true
+workflow.Or(condition1, condition2)         // At least one must be true
+workflow.Not(condition)                     // Negate condition
+
+// Field/variable access
+workflow.Field("shouldRetry")               // Access workflow variable
+workflow.Var("errorMessage")                // Access task variable
+workflow.Number(3)                          // Numeric literal
+workflow.Literal("network")                 // String literal
+```
+
+**Files Updated (Example 10)**:
+- Updated header comments to explain modern patterns and circular flow handling
+- Replaced `WithCase()` with `WithCaseRef()` + complex condition builders (`And`, `LessThan`)
+- Replaced `WithDefault()` with `WithDefaultRef()`
+- Replaced all `.Then("task")` with `.ThenRef(taskRef)` in error handlers
+- Added detailed comments explaining condition composition
+- Showed "define first, connect later" pattern for circular retry flows
+- Documented circular reference handling explicitly
+
+**Testing**:
+```bash
+# Verify updated example compiles
+cd stigmer-sdk/go
+go build ./examples/10_workflow_with_error_handling.go
+# Result: Success (compiles cleanly)
+
+# Verify example structure
+go run examples/10_workflow_with_error_handling.go
+# Result: Workflow created with type-safe error handling flows
+```
+
+**Impact**:
+- ✅ Critical error handling example now demonstrates best practices
+- ✅ Shows how to handle complex flows (retry loops) with type safety
+- ✅ Demonstrates advanced condition composition (`And`, `LessThan`)
+- ✅ Examples 08, 09, and 10 now consistently use modern patterns
+- ✅ Production-ready error handling patterns showcased
+- ✅ Circular reference pattern documented explicitly
+
+**Production Benefits**:
+
+For error handling specifically:
+
+| Scenario | Old API Risk | New API Benefit |
+|----------|-------------|-----------------|
+| **Incident response** | Typo breaks error flow → cascading failure | IDE catches typos → safe refactoring |
+| **Adding retry path** | String mismatch → silent failures | Compiler enforces task existence |
+| **Refactoring error handlers** | Find/replace misses references | IDE refactors all references |
+| **Code review** | Hard to trace error flows | Click through task references |
+| **Testing** | Mock task names fragile | Type-safe test fixtures |
+
+**Pattern: Error Handling with Type Safety**
+
+```go
+// 1. Define error handlers first (for forward references)
+handleErrorTask := workflow.SetTask("handleError", ...).End()
+retryTask := workflow.SetTask("retry", ...).End()
+
+// 2. Define conditional logic with builders
+checkTask := workflow.SwitchTask("checkRetry",
+    workflow.WithCaseRef(
+        workflow.And(
+            workflow.Field("shouldRetry"),
+            workflow.LessThan(workflow.Field("attempts"), workflow.Number(3)),
+        ),
+        retryTask,
+    ),
+    workflow.WithDefaultRef(handleErrorTask),
+).End()
+
+// 3. Connect error handlers with type-safe references
+mainTask := workflow.TryTask("operation",
+    workflow.WithTry(/* ... */),
+    workflow.WithCatch(
+        []string{"NetworkError"},
+        "err",
+        workflow.SetTask("logError", ...).ThenRef(checkTask),
+    ),
+).End()
+
+// 4. Connect circular retry flows
+retryTask.ThenRef(mainTask)  // Retry loops back to main task
+```
+
+**Prevention**:
+- Review error handling examples when API patterns evolve
+- Error handling should showcase most robust patterns
+- Document circular reference patterns explicitly
+- Show complex condition composition (And, Or, comparisons)
+- Test retry loops and circular flows
+- Keep error handling examples production-realistic
+
+**Cross-Language Reference**:
+- **Python SDK**: Similar patterns would use type hints + Union types for error handlers
+- **TypeScript SDK**: Would leverage discriminated unions for task types + type guards
+- **Reusable concept**: "Define first, reference later" pattern works across languages
+
 **Design Principle**: **Examples as Living Documentation**
 
 Examples should demonstrate:
@@ -2912,6 +3192,27 @@ Examples should demonstrate:
 - **Go approach**: Leverage compiler for type safety
 - **Reusable concept**: Evolve examples alongside API improvements
 - **Apply to Python SDK**: Review examples for consistency with latest API
+
+---
+
+### 2026-01-15 - Error Type Contract Discovery: SDK ↔ Backend Error Type Matching
+
+**Problem**: SDK examples used fictional error types that didn't match backend, causing error handlers to never execute.
+
+**Root Cause**: Undocumented SDK ↔ Backend contract. Examples showed `"NetworkError"`, `"TimeoutError"`, `"ValidationError"` but backend actually generates `"CallHTTP error"`, `"CallGRPC error"`, `"Validation"`.
+
+**Discovery**: User question about error type strings triggered backend audit, uncovering mismatch.
+
+**Solution**: Created comprehensive error type system (Option 3):
+- Constants matching backend exactly (ErrorTypeHTTPCall = "CallHTTP error")
+- Type-safe matchers (CatchHTTPErrors(), CatchGRPCErrors())
+- Rich metadata registry (ErrorRegistry with docs, examples, sources)
+- Fixed Example 10 to use correct types
+- 100+ tests verifying alignment
+
+**Impact**: Critical - Fixed broken error handlers, documented contract, enabled IDE discovery.
+
+**Pattern**: Cross-Repository Contract Codification - Audit backend, create SDK constants, document contract, test alignment.
 
 ---
 

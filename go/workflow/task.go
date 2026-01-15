@@ -782,10 +782,94 @@ func WaitTask(name string, opts ...WaitTaskOption) *Task {
 type WaitTaskOption func(*WaitTaskConfig)
 
 // WithDuration sets the wait duration.
+// Accepts both string format and type-safe duration helpers.
+//
+// String format examples: "5s", "1m", "1h", "1d"
+//
+// For better type safety and IDE support, consider using duration helpers:
+//
+//	workflow.WithDuration(workflow.Seconds(5))   // Type-safe
+//	workflow.WithDuration(workflow.Minutes(30))  // Discoverable
+//	workflow.WithDuration("5s")                  // Also valid
 func WithDuration(duration string) WaitTaskOption {
 	return func(cfg *WaitTaskConfig) {
 		cfg.Duration = duration
 	}
+}
+
+// ============================================================================
+// Duration Builders - Type-safe helpers for time durations
+// ============================================================================
+
+// Seconds creates a duration string for the specified number of seconds.
+// This is a type-safe helper that replaces manual "Xs" string formatting.
+//
+// Example:
+//
+//	workflow.WaitTask("delay",
+//	    workflow.WithDuration(workflow.Seconds(5)),  // ✅ Type-safe!
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	WithDuration("5s")  // ❌ Not type-safe, typo-prone
+//	WithDuration(Seconds(5))  // ✅ Type-safe, discoverable
+func Seconds(count int) string {
+	return fmt.Sprintf("%ds", count)
+}
+
+// Minutes creates a duration string for the specified number of minutes.
+// This is a type-safe helper that replaces manual "Xm" string formatting.
+//
+// Example:
+//
+//	workflow.WaitTask("delay",
+//	    workflow.WithDuration(workflow.Minutes(5)),
+//	)
+//
+// Common use cases:
+//   - Polling intervals
+//   - Retry delays
+//   - Timeout configurations
+//   - Rate limiting windows
+func Minutes(count int) string {
+	return fmt.Sprintf("%dm", count)
+}
+
+// Hours creates a duration string for the specified number of hours.
+// This is a type-safe helper that replaces manual "Xh" string formatting.
+//
+// Example:
+//
+//	workflow.WaitTask("delay",
+//	    workflow.WithDuration(workflow.Hours(2)),
+//	)
+//
+// Common use cases:
+//   - Long-running batch jobs
+//   - Scheduled task delays
+//   - Cache expiration
+//   - Token validity periods
+func Hours(count int) string {
+	return fmt.Sprintf("%dh", count)
+}
+
+// Days creates a duration string for the specified number of days.
+// This is a type-safe helper that replaces manual "Xd" string formatting.
+//
+// Example:
+//
+//	workflow.WaitTask("delay",
+//	    workflow.WithDuration(workflow.Days(7)),
+//	)
+//
+// Common use cases:
+//   - Weekly scheduled tasks
+//   - Retention periods
+//   - Subscription renewals
+//   - Long-term delays
+func Days(count int) string {
+	return fmt.Sprintf("%dd", count)
 }
 
 // ============================================================================
@@ -982,6 +1066,192 @@ func Interpolate(parts ...string) string {
 		result += part
 	}
 	return result
+}
+
+// ============================================================================
+// Error Field Accessors - Type-safe helpers for accessing caught error fields
+// ============================================================================
+
+// ErrorMessage returns a reference to the message field of a caught error.
+// This is a type-safe helper that replaces manual "${errorVar.message}" syntax.
+//
+// When an error is caught in a CATCH block with `as: "errorVar"`, the error object
+// contains several fields. ErrorMessage() provides a discoverable way to access
+// the human-readable error description.
+//
+// Example:
+//
+//	workflow.WithCatchTyped(
+//	    workflow.CatchHTTPErrors(),
+//	    "httpErr",
+//	    workflow.SetTask("handleError",
+//	        workflow.SetVar("errorMessage", workflow.ErrorMessage("httpErr")),
+//	    ),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("errorMessage", "${httpErr.message}")  // ❌ Old way - not discoverable
+//	SetVar("errorMessage", ErrorMessage("httpErr")) // ✅ New way - type-safe
+func ErrorMessage(errorVar string) string {
+	return fmt.Sprintf("${%s.message}", errorVar)
+}
+
+// ErrorCode returns a reference to the code field of a caught error.
+// This is a type-safe helper that replaces manual "${errorVar.code}" syntax.
+//
+// The error code is a machine-readable string that indicates the error type.
+// This is useful for logging or conditional logic based on error types.
+//
+// Example:
+//
+//	workflow.WithCatchTyped(
+//	    workflow.CatchAny(),
+//	    "err",
+//	    workflow.SetTask("logError",
+//	        workflow.SetVar("errorCode", workflow.ErrorCode("err")),
+//	    ),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("errorCode", "${err.code}")  // ❌ Old way - not discoverable
+//	SetVar("errorCode", ErrorCode("err")) // ✅ New way - type-safe
+func ErrorCode(errorVar string) string {
+	return fmt.Sprintf("${%s.code}", errorVar)
+}
+
+// ErrorStackTrace returns a reference to the stackTrace field of a caught error.
+// This is a type-safe helper that replaces manual "${errorVar.stackTrace}" syntax.
+//
+// The stack trace provides debugging information about where the error occurred.
+// This is optional and may not be present for all error types.
+//
+// Example:
+//
+//	workflow.WithCatchTyped(
+//	    workflow.CatchAny(),
+//	    "err",
+//	    workflow.SetTask("logError",
+//	        workflow.SetVar("errorStackTrace", workflow.ErrorStackTrace("err")),
+//	    ),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("errorStackTrace", "${err.stackTrace}")  // ❌ Old way - not discoverable
+//	SetVar("errorStackTrace", ErrorStackTrace("err")) // ✅ New way - type-safe
+func ErrorStackTrace(errorVar string) string {
+	return fmt.Sprintf("${%s.stackTrace}", errorVar)
+}
+
+// ErrorObject returns a reference to the entire caught error object.
+// This is a type-safe helper that replaces manual "${errorVar}" syntax.
+//
+// Use this when you want to pass the entire error object (with all fields)
+// to another task, such as logging or external error tracking services.
+//
+// Example:
+//
+//	workflow.WithCatchTyped(
+//	    workflow.CatchAny(),
+//	    "err",
+//	    workflow.HttpCallTask("reportError",
+//	        workflow.WithHTTPPost(),
+//	        workflow.WithURI("https://api.example.com/errors"),
+//	        workflow.WithBody(map[string]any{
+//	            "error": workflow.ErrorObject("err"), // Pass entire error
+//	            "workflow": "data-pipeline",
+//	        }),
+//	    ),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	"error": "${err}"  // ❌ Old way - not discoverable
+//	"error": ErrorObject("err") // ✅ New way - type-safe
+func ErrorObject(errorVar string) string {
+	return fmt.Sprintf("${%s}", errorVar)
+}
+
+// ============================================================================
+// Arithmetic Expression Builders - Common patterns for computed values
+// ============================================================================
+
+// Increment returns an expression that adds 1 to a variable.
+// This is a high-level helper for the extremely common pattern of incrementing counters.
+//
+// Use this for retry counters, iteration counts, and other increment scenarios.
+//
+// Example:
+//
+//	workflow.SetTask("retry",
+//	    workflow.SetVar("retryCount", workflow.Increment("retryCount")),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("retryCount", "${retryCount + 1}")  // ❌ Old way - not discoverable
+//	SetVar("retryCount", Increment("retryCount")) // ✅ New way - type-safe
+//
+// Common use cases:
+//   - Retry counters in error handling
+//   - Loop iteration counters
+//   - Attempt tracking
+//   - Step numbering
+func Increment(varName string) string {
+	return fmt.Sprintf("${%s + 1}", varName)
+}
+
+// Decrement returns an expression that subtracts 1 from a variable.
+// This is a high-level helper for the common pattern of decrementing counters.
+//
+// Use this for countdown timers, remaining items, and other decrement scenarios.
+//
+// Example:
+//
+//	workflow.SetTask("processItem",
+//	    workflow.SetVar("remaining", workflow.Decrement("remaining")),
+//	)
+//
+// This replaces the old string-based syntax:
+//
+//	SetVar("remaining", "${remaining - 1}")  // ❌ Old way - not discoverable
+//	SetVar("remaining", Decrement("remaining")) // ✅ New way - type-safe
+//
+// Common use cases:
+//   - Countdown timers
+//   - Remaining items tracking
+//   - Capacity tracking
+//   - Quota management
+func Decrement(varName string) string {
+	return fmt.Sprintf("${%s - 1}", varName)
+}
+
+// Expr provides an escape hatch for complex expressions that don't have dedicated helpers.
+// Use this when you need arithmetic, string concatenation, or other computations
+// that aren't covered by simple helpers like Increment() or Decrement().
+//
+// This is the "progressive disclosure" pattern - simple things use helpers,
+// complex things use expressions directly.
+//
+// Example:
+//
+//	// Complex arithmetic
+//	workflow.SetVar("total", workflow.Expr("(price * quantity) + tax"))
+//
+//	// String concatenation
+//	workflow.SetVar("fullName", workflow.Expr("firstName + ' ' + lastName"))
+//
+//	// Conditional expressions
+//	workflow.SetVar("status", workflow.Expr("score >= 90 ? 'A' : 'B'"))
+//
+// Note: For simple cases, prefer dedicated helpers:
+//   - Use Increment("x") instead of Expr("x + 1")
+//   - Use VarRef("name") instead of Expr("name") for simple references
+//   - Use ErrorMessage("err") instead of Expr("err.message") for error fields
+func Expr(expression string) string {
+	return fmt.Sprintf("${%s}", expression)
 }
 
 // ============================================================================

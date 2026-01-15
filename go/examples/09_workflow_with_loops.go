@@ -20,11 +20,16 @@ import (
 //
 // 4. Aggregates final results
 //
-// Key improvements shown:
-// - Type-safe task references with .ThenRef() instead of string-based .Then()
-// - Type-safe switch cases with WithCaseRef() and WithDefaultRef()
-// - High-level condition builders (Equals, Field, Literal)
-// - Define tasks first, then reference them (more refactoring-friendly)
+// Modern patterns demonstrated:
+// - Type-safe HTTP methods (WithHTTPGet, WithHTTPPost) instead of raw strings
+// - Arithmetic expression helpers (Increment) for counter increments
+// - Variable/field reference helpers (VarRef, FieldRef) instead of "${...}" strings
+// - Condition builders (Equals, Field, Literal) instead of raw expression strings
+// - Type-safe task references (ThenRef, WithCaseRef, WithDefaultRef) instead of string names
+// - Type-safe setters (SetInt, SetString, SetVar) for different value types
+// - Export helpers (ExportField) for extracting specific response fields
+// - "Define first, reference later" pattern for compile-time validation
+// - FOR loop iteration over collections with type-safe task chaining
 func main() {
 	defer stigmeragent.Complete()
 
@@ -38,11 +43,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Task 1: Fetch list of items using high-level helper
+	// Task 1: Fetch list of items from API
+	// ExportField("items") extracts the "items" field from response and makes it available to next task
 	fetchTask := workflow.HttpCallTask("fetchItems",
 		workflow.WithHTTPGet(), // Type-safe HTTP method
 		workflow.WithURI("https://api.example.com/items"),
-	).ExportField("items")
+	).ExportField("items") // Make items array available for the FOR loop
 
 	// Task 2: Initialize counter using type-safe setters
 	initTask := workflow.SetTask("initCounter",
@@ -52,22 +58,23 @@ func main() {
 
 	// Define counter increment tasks first so we can reference them type-safely
 	//
-	// Task 5: Increment success counter using expression in SetVar
-	// Note: SetVar with expression allows dynamic computation like "${processedCount + 1}"
+	// Task 5: Increment success counter using type-safe helper
 	incrementSuccessTask := workflow.SetTask("incrementSuccess",
-		workflow.SetVar("processedCount", "${processedCount + 1}"),
+		workflow.SetVar("processedCount", workflow.Increment("processedCount")), // ✅ Type-safe increment
 	).End()
 
-	// Task 6: Increment failed counter using expression in SetVar
+	// Task 6: Increment failed counter using type-safe helper
 	incrementFailedTask := workflow.SetTask("incrementFailed",
-		workflow.SetVar("failedCount", "${failedCount + 1}"),
+		workflow.SetVar("failedCount", workflow.Increment("failedCount")), // ✅ Type-safe increment
 	).End()
 
-	// Task 4: Check result and route to appropriate counter using condition builders
+	// Task 4: Check processing result and route to appropriate counter
 	//
-	// Using high-level condition builder instead of raw string expression:
-	// - Equals(Field("result.success"), Literal("true")) is more readable than "${.result.success}"
-	// - Type-safe task references prevent typos in task names
+	// This SWITCH task examines the result of processItem:
+	// - If result.success == "true": increment success counter
+	// - Otherwise: increment failed counter
+	//
+	// Using type-safe condition builder instead of raw string expression
 	checkResultTask := workflow.SwitchTask("checkResult",
 		workflow.WithCaseRef(
 			workflow.Equals(workflow.Field("result.success"), workflow.Literal("true")),
@@ -96,14 +103,33 @@ func main() {
 		),
 	)
 
-	// Task 7: Aggregate results using variable references
+	// Task 7: Aggregate final results after loop completes
+	// VarRef reads the counter values accumulated during loop iteration
 	aggregateTask := workflow.SetTask("aggregateResults",
-		workflow.SetVar("totalProcessed", workflow.VarRef("processedCount")),
-		workflow.SetVar("totalFailed", workflow.VarRef("failedCount")),
+		workflow.SetVar("totalProcessed", workflow.VarRef("processedCount")), // Copy final count
+		workflow.SetVar("totalFailed", workflow.VarRef("failedCount")),       // Copy final count
 		workflow.SetString("status", "completed"),
 	).End()
 
 	// Connect tasks using type-safe references
+	//
+	// Flow diagram:
+	//   fetchItems (GET /items → returns array)
+	//        ↓
+	//   initCounter (processedCount=0, failedCount=0)
+	//        ↓
+	//   processEachItem (FOR loop over items array)
+	//        ↓ (for each item)
+	//   processItem (POST /process with item data)
+	//        ↓
+	//   checkResult (if result.success == "true"?)
+	//        ↓ YES                    ↓ NO
+	//   incrementSuccess         incrementFailed
+	//        ↓                        ↓
+	//        └────────┬───────────────┘
+	//              (loop continues for next item)
+	//                 ↓
+	//   aggregateResults (after all items processed)
 	fetchTask.ThenRef(initTask)
 	initTask.ThenRef(processTask)
 	processTask.ThenRef(aggregateTask)

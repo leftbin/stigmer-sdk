@@ -558,6 +558,129 @@ func TestInterpolate(t *testing.T) {
 	}
 }
 
+func TestErrorMessage(t *testing.T) {
+	result := workflow.ErrorMessage("httpErr")
+	expected := "${httpErr.message}"
+
+	if result != expected {
+		t.Errorf("ErrorMessage() = %q, want %q", result, expected)
+	}
+}
+
+func TestErrorCode(t *testing.T) {
+	result := workflow.ErrorCode("grpcErr")
+	expected := "${grpcErr.code}"
+
+	if result != expected {
+		t.Errorf("ErrorCode() = %q, want %q", result, expected)
+	}
+}
+
+func TestErrorStackTrace(t *testing.T) {
+	result := workflow.ErrorStackTrace("err")
+	expected := "${err.stackTrace}"
+
+	if result != expected {
+		t.Errorf("ErrorStackTrace() = %q, want %q", result, expected)
+	}
+}
+
+func TestErrorObject(t *testing.T) {
+	result := workflow.ErrorObject("validationErr")
+	expected := "${validationErr}"
+
+	if result != expected {
+		t.Errorf("ErrorObject() = %q, want %q", result, expected)
+	}
+}
+
+func TestIncrement(t *testing.T) {
+	result := workflow.Increment("retryCount")
+	expected := "${retryCount + 1}"
+
+	if result != expected {
+		t.Errorf("Increment() = %q, want %q", result, expected)
+	}
+}
+
+func TestDecrement(t *testing.T) {
+	result := workflow.Decrement("remaining")
+	expected := "${remaining - 1}"
+
+	if result != expected {
+		t.Errorf("Decrement() = %q, want %q", result, expected)
+	}
+}
+
+func TestExpr(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     string
+		expected string
+	}{
+		{
+			name:     "arithmetic expression",
+			expr:     "(price * quantity) + tax",
+			expected: "${(price * quantity) + tax}",
+		},
+		{
+			name:     "string concatenation",
+			expr:     "firstName + ' ' + lastName",
+			expected: "${firstName + ' ' + lastName}",
+		},
+		{
+			name:     "conditional expression",
+			expr:     "score >= 90 ? 'A' : 'B'",
+			expected: "${score >= 90 ? 'A' : 'B'}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := workflow.Expr(tt.expr)
+			if result != tt.expected {
+				t.Errorf("Expr(%q) = %q, want %q", tt.expr, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSeconds(t *testing.T) {
+	result := workflow.Seconds(5)
+	expected := "5s"
+
+	if result != expected {
+		t.Errorf("Seconds(5) = %q, want %q", result, expected)
+	}
+}
+
+func TestMinutes(t *testing.T) {
+	result := workflow.Minutes(30)
+	expected := "30m"
+
+	if result != expected {
+		t.Errorf("Minutes(30) = %q, want %q", result, expected)
+	}
+}
+
+func TestHours(t *testing.T) {
+	result := workflow.Hours(2)
+	expected := "2h"
+
+	if result != expected {
+		t.Errorf("Hours(2) = %q, want %q", result, expected)
+	}
+}
+
+func TestDays(t *testing.T) {
+	result := workflow.Days(7)
+	expected := "7d"
+
+	if result != expected {
+		t.Errorf("Days(7) = %q, want %q", result, expected)
+	}
+}
+
 func TestField(t *testing.T) {
 	got := workflow.Field("status")
 	want := ".status"
