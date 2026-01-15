@@ -1,4 +1,4 @@
-module github.com/leftbin/stigmer-sdk/go
+module github.com/leftbin/stigmer-sdk
 
 go 1.25.0
 
