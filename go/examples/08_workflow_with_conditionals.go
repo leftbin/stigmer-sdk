@@ -11,13 +11,21 @@ import (
 // This example demonstrates conditional logic using SWITCH tasks.
 //
 // The workflow:
-// 1. Fetches data from an API
-// 2. Checks the HTTP status code
-// 3. Routes to different handlers based on status
+// 1. Fetches data from an API (HTTP_CALL task)
+//    - Returns: {status: 200, body: "...", headers: {...}}
+//    - Exports all fields to workflow context with .ExportAll()
+// 2. Checks the HTTP status code (SWITCH task)
+//    - Accesses .status from context using Field("status")
+// 3. Routes to different handlers based on status (SET tasks)
+//    - Each handler can access .body, .status, etc. via FieldRef()
+//
+// Data flow: HTTP response → context → condition checks → handlers
 //
 // Key improvements shown:
 // - Version is optional (defaults to "0.1.0" if not provided)
 // - Type-safe task references with .ThenRef()
+// - Type-safe switch cases with WithCaseRef() and WithDefaultRef()
+// - High-level condition builders (Equals, GreaterThanOrEqual, Field, Number)
 // - High-level helpers (ExportAll, SetString, SetBool, FieldRef, Interpolate)
 func main() {
 	defer stigmeragent.Complete()
@@ -34,48 +42,69 @@ func main() {
 	}
 
 	// Task 1: Fetch data using high-level helper
-	// Returns task reference for type-safe .ThenRef()
+	//
+	// HTTP_CALL task returns an object with these fields:
+	//   - status: HTTP status code (e.g., 200, 404, 500)
+	//   - body: Response body
+	//   - headers: Response headers
+	//
+	// .ExportAll() exports this entire object to the workflow context,
+	// making all fields available to subsequent tasks via Field("fieldName")
 	fetchTask := wf.AddTask(workflow.HttpCallTask("fetchData",
 		workflow.WithMethod("GET"),
 		workflow.WithURI("https://api.example.com/data"),
-	).ExportAll()) // High-level helper instead of Export("${.}")
+	).ExportAll()) // Exports the HTTP response (status, body, headers) to context
 
-	// Task 2: Check HTTP status and route accordingly
-	// Using string-based references (simpler but less type-safe)
-	checkTask := wf.AddTask(workflow.SwitchTask("checkStatus",
-		workflow.WithCase("${.status == 200}", "handleSuccess"),
-		workflow.WithCase("${.status == 404}", "handleNotFound"),
-		workflow.WithCase("${.status >= 500}", "handleServerError"),
-		workflow.WithDefault("handleUnexpectedError"),
-	))
-
-	// Connect fetch → check using type-safe task reference
-	fetchTask.ThenRef(checkTask) // Type-safe! Refactoring-friendly!
-
+	// Define handler tasks first so we can reference them type-safely
 	// Task 3: Handle successful response using type-safe setters
-	wf.AddTask(workflow.SetTask("handleSuccess",
+	//
+	// FieldRef("body") accesses the "body" field from the HTTP response
+	// that was exported by fetchTask.ExportAll()
+	successTask := wf.AddTask(workflow.SetTask("handleSuccess",
 		workflow.SetString("result", "success"),
-		workflow.SetVar("data", workflow.FieldRef("body")),
+		workflow.SetVar("data", workflow.FieldRef("body")), // Access HTTP response body
 	).End()) // Explicit .End() instead of .Then("end")
 
 	// Task 4: Handle 404 Not Found
-	wf.AddTask(workflow.SetTask("handleNotFound",
+	notFoundTask := wf.AddTask(workflow.SetTask("handleNotFound",
 		workflow.SetString("result", "not_found"),
 		workflow.SetString("message", "Resource not found"),
-	).Then(workflow.EndFlow)) // Using EndFlow constant
+	).End())
 
 	// Task 5: Handle server errors (5xx) using type-safe boolean
-	wf.AddTask(workflow.SetTask("handleServerError",
+	serverErrorTask := wf.AddTask(workflow.SetTask("handleServerError",
 		workflow.SetString("result", "server_error"),
 		workflow.SetString("message", "Server error occurred"),
 		workflow.SetBool("shouldRetry", true), // Type-safe boolean instead of "true"
 	).End())
 
 	// Task 6: Handle unexpected errors using field reference
-	wf.AddTask(workflow.SetTask("handleUnexpectedError",
+	//
+	// FieldRef("status") accesses the HTTP status code from the exported response
+	// Interpolate() combines the literal string with the status value
+	unexpectedErrorTask := wf.AddTask(workflow.SetTask("handleUnexpectedError",
 		workflow.SetString("result", "error"),
 		workflow.SetVar("message", workflow.Interpolate("Unexpected status code: ", workflow.FieldRef("status"))),
 	).End())
+
+	// Task 2: Check HTTP status and route accordingly
+	//
+	// Field("status") accesses the "status" field from the HTTP response that was
+	// exported by fetchTask.ExportAll() above. The workflow context now contains:
+	//   - .status (the HTTP status code we're checking)
+	//   - .body (the response body we reference in handlers)
+	//   - .headers (the response headers)
+	//
+	// Using high-level condition builders + type-safe task references
+	checkTask := wf.AddTask(workflow.SwitchTask("checkStatus",
+		workflow.WithCaseRef(workflow.Equals(workflow.Field("status"), workflow.Number(200)), successTask),
+		workflow.WithCaseRef(workflow.Equals(workflow.Field("status"), workflow.Number(404)), notFoundTask),
+		workflow.WithCaseRef(workflow.GreaterThanOrEqual(workflow.Field("status"), workflow.Number(500)), serverErrorTask),
+		workflow.WithDefaultRef(unexpectedErrorTask),
+	))
+
+	// Connect fetch → check using type-safe task reference
+	fetchTask.ThenRef(checkTask) // Type-safe! Refactoring-friendly!
 
 	log.Printf("Created conditional workflow: %s", wf)
 }

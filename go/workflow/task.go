@@ -1,6 +1,9 @@
 package workflow
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // TaskKind represents the type of workflow task.
 type TaskKind string
@@ -920,4 +923,100 @@ func Interpolate(parts ...string) string {
 		result += part
 	}
 	return result
+}
+
+// ============================================================================
+// Condition Builders - High-level helpers for building conditional expressions
+// ============================================================================
+
+// Field returns a field reference expression (without ${} wrapper) for use in conditions.
+// This is specifically for condition builders. For variable interpolation, use FieldRef().
+// Example: Field("status") returns ".status"
+func Field(fieldPath string) string {
+	return fmt.Sprintf(".%s", fieldPath)
+}
+
+// Var returns a variable reference expression (without ${} wrapper) for use in conditions.
+// This is specifically for condition builders. For variable interpolation, use VarRef().
+// Example: Var("apiURL") returns "apiURL"
+func Var(varName string) string {
+	return varName
+}
+
+// Literal returns a literal value wrapped in quotes for use in conditions.
+// Example: Literal("200") returns "\"200\""
+func Literal(value string) string {
+	return fmt.Sprintf("\"%s\"", value)
+}
+
+// Number returns a numeric literal for use in conditions (no quotes).
+// Example: Number(200) returns "200"
+func Number(value interface{}) string {
+	return fmt.Sprintf("%v", value)
+}
+
+// Equals builds an equality condition expression.
+// Example: Equals(Field("status"), Number(200)) generates "${.status == 200}"
+func Equals(left, right string) string {
+	return fmt.Sprintf("${%s == %s}", left, right)
+}
+
+// NotEquals builds an inequality condition expression.
+// Example: NotEquals(FieldRef("status"), "200") generates "${.status != 200}"
+func NotEquals(left, right string) string {
+	return fmt.Sprintf("${%s != %s}", left, right)
+}
+
+// GreaterThan builds a greater-than condition expression.
+// Example: GreaterThan(FieldRef("count"), "10") generates "${.count > 10}"
+func GreaterThan(left, right string) string {
+	return fmt.Sprintf("${%s > %s}", left, right)
+}
+
+// GreaterThanOrEqual builds a greater-than-or-equal condition expression.
+// Example: GreaterThanOrEqual(FieldRef("status"), "500") generates "${.status >= 500}"
+func GreaterThanOrEqual(left, right string) string {
+	return fmt.Sprintf("${%s >= %s}", left, right)
+}
+
+// LessThan builds a less-than condition expression.
+// Example: LessThan(FieldRef("count"), "100") generates "${.count < 100}"
+func LessThan(left, right string) string {
+	return fmt.Sprintf("${%s < %s}", left, right)
+}
+
+// LessThanOrEqual builds a less-than-or-equal condition expression.
+// Example: LessThanOrEqual(FieldRef("count"), "100") generates "${.count <= 100}"
+func LessThanOrEqual(left, right string) string {
+	return fmt.Sprintf("${%s <= %s}", left, right)
+}
+
+// And combines multiple conditions with logical AND.
+// Example: And(Equals(FieldRef("status"), "200"), Equals(FieldRef("type"), "success"))
+func And(conditions ...string) string {
+	// Remove ${ and } wrappers from conditions for proper nesting
+	unwrapped := make([]string, len(conditions))
+	for i, cond := range conditions {
+		unwrapped[i] = strings.TrimPrefix(strings.TrimSuffix(cond, "}"), "${")
+	}
+	return fmt.Sprintf("${%s}", strings.Join(unwrapped, " && "))
+}
+
+// Or combines multiple conditions with logical OR.
+// Example: Or(Equals(FieldRef("status"), "200"), Equals(FieldRef("status"), "201"))
+func Or(conditions ...string) string {
+	// Remove ${ and } wrappers from conditions for proper nesting
+	unwrapped := make([]string, len(conditions))
+	for i, cond := range conditions {
+		unwrapped[i] = strings.TrimPrefix(strings.TrimSuffix(cond, "}"), "${")
+	}
+	return fmt.Sprintf("${%s}", strings.Join(unwrapped, " || "))
+}
+
+// Not negates a condition.
+// Example: Not(Equals(FieldRef("status"), "200")) generates "${!(.status == 200)}"
+func Not(condition string) string {
+	// Remove ${ and } wrapper from condition for proper nesting
+	unwrapped := strings.TrimPrefix(strings.TrimSuffix(condition, "}"), "${")
+	return fmt.Sprintf("${!(%s)}", unwrapped)
 }

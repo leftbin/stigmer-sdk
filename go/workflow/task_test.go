@@ -140,6 +140,77 @@ func TestSwitchTask(t *testing.T) {
 	}
 }
 
+func TestSwitchTask_WithCaseRef(t *testing.T) {
+	// Create handler tasks
+	successTask := workflow.SetTask("handleSuccess", workflow.SetString("result", "success"))
+	notFoundTask := workflow.SetTask("handleNotFound", workflow.SetString("result", "not_found"))
+	errorTask := workflow.SetTask("handleError", workflow.SetString("result", "error"))
+
+	// Create switch task using type-safe task references
+	task := workflow.SwitchTask("checkStatus",
+		workflow.WithCaseRef("${.status == 200}", successTask),
+		workflow.WithCaseRef("${.status == 404}", notFoundTask),
+		workflow.WithDefaultRef(errorTask),
+	)
+
+	cfg, ok := task.Config.(*workflow.SwitchTaskConfig)
+	if !ok {
+		t.Fatal("SwitchTask() config type is not *SwitchTaskConfig")
+	}
+
+	if len(cfg.Cases) != 2 {
+		t.Errorf("SwitchTask() cases count = %d, want 2", len(cfg.Cases))
+	}
+
+	// Verify case references are correct
+	if cfg.Cases[0].Then != "handleSuccess" {
+		t.Errorf("WithCaseRef() case 0 then = %q, want %q", cfg.Cases[0].Then, "handleSuccess")
+	}
+
+	if cfg.Cases[1].Then != "handleNotFound" {
+		t.Errorf("WithCaseRef() case 1 then = %q, want %q", cfg.Cases[1].Then, "handleNotFound")
+	}
+
+	// Verify default reference is correct
+	if cfg.DefaultTask != "handleError" {
+		t.Errorf("WithDefaultRef() default = %q, want %q", cfg.DefaultTask, "handleError")
+	}
+}
+
+func TestSwitchTask_MixedReferences(t *testing.T) {
+	// Test mixing string-based and reference-based cases
+	successTask := workflow.SetTask("handleSuccess", workflow.SetString("result", "success"))
+	errorTask := workflow.SetTask("handleError", workflow.SetString("result", "error"))
+
+	task := workflow.SwitchTask("checkStatus",
+		workflow.WithCaseRef("${.status == 200}", successTask),    // Type-safe
+		workflow.WithCase("${.status == 404}", "handleNotFound"), // String-based
+		workflow.WithDefaultRef(errorTask),                       // Type-safe
+	)
+
+	cfg, ok := task.Config.(*workflow.SwitchTaskConfig)
+	if !ok {
+		t.Fatal("SwitchTask() config type is not *SwitchTaskConfig")
+	}
+
+	if len(cfg.Cases) != 2 {
+		t.Errorf("SwitchTask() cases count = %d, want 2", len(cfg.Cases))
+	}
+
+	// Both approaches should work together
+	if cfg.Cases[0].Then != "handleSuccess" {
+		t.Errorf("WithCaseRef() then = %q, want %q", cfg.Cases[0].Then, "handleSuccess")
+	}
+
+	if cfg.Cases[1].Then != "handleNotFound" {
+		t.Errorf("WithCase() then = %q, want %q", cfg.Cases[1].Then, "handleNotFound")
+	}
+
+	if cfg.DefaultTask != "handleError" {
+		t.Errorf("WithDefaultRef() default = %q, want %q", cfg.DefaultTask, "handleError")
+	}
+}
+
 func TestForTask(t *testing.T) {
 	task := workflow.ForTask("processItems",
 		workflow.WithIn("${.items}"),
@@ -484,6 +555,140 @@ func TestInterpolate(t *testing.T) {
 
 	if result != expected {
 		t.Errorf("Interpolate() complex = %q, want %q", result, expected)
+	}
+}
+
+func TestField(t *testing.T) {
+	got := workflow.Field("status")
+	want := ".status"
+	if got != want {
+		t.Errorf("Field() = %q, want %q", got, want)
+	}
+}
+
+func TestVar(t *testing.T) {
+	got := workflow.Var("apiURL")
+	want := "apiURL"
+	if got != want {
+		t.Errorf("Var() = %q, want %q", got, want)
+	}
+}
+
+func TestLiteral(t *testing.T) {
+	got := workflow.Literal("success")
+	want := "\"success\""
+	if got != want {
+		t.Errorf("Literal() = %q, want %q", got, want)
+	}
+}
+
+func TestNumber(t *testing.T) {
+	tests := []struct {
+		name  string
+		input interface{}
+		want  string
+	}{
+		{"integer", 200, "200"},
+		{"float", 3.14, "3.14"},
+		{"negative", -1, "-1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := workflow.Number(tt.input)
+			if got != tt.want {
+				t.Errorf("Number(%v) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEquals(t *testing.T) {
+	got := workflow.Equals(workflow.Field("status"), workflow.Number(200))
+	want := "${.status == 200}"
+	if got != want {
+		t.Errorf("Equals() = %q, want %q", got, want)
+	}
+}
+
+func TestNotEquals(t *testing.T) {
+	got := workflow.NotEquals(workflow.Field("status"), workflow.Number(404))
+	want := "${.status != 404}"
+	if got != want {
+		t.Errorf("NotEquals() = %q, want %q", got, want)
+	}
+}
+
+func TestGreaterThan(t *testing.T) {
+	got := workflow.GreaterThan(workflow.Field("count"), workflow.Number(10))
+	want := "${.count > 10}"
+	if got != want {
+		t.Errorf("GreaterThan() = %q, want %q", got, want)
+	}
+}
+
+func TestGreaterThanOrEqual(t *testing.T) {
+	got := workflow.GreaterThanOrEqual(workflow.Field("status"), workflow.Number(500))
+	want := "${.status >= 500}"
+	if got != want {
+		t.Errorf("GreaterThanOrEqual() = %q, want %q", got, want)
+	}
+}
+
+func TestLessThan(t *testing.T) {
+	got := workflow.LessThan(workflow.Field("count"), workflow.Number(100))
+	want := "${.count < 100}"
+	if got != want {
+		t.Errorf("LessThan() = %q, want %q", got, want)
+	}
+}
+
+func TestLessThanOrEqual(t *testing.T) {
+	got := workflow.LessThanOrEqual(workflow.Field("count"), workflow.Number(100))
+	want := "${.count <= 100}"
+	if got != want {
+		t.Errorf("LessThanOrEqual() = %q, want %q", got, want)
+	}
+}
+
+func TestAnd(t *testing.T) {
+	cond1 := workflow.Equals(workflow.Field("status"), workflow.Number(200))
+	cond2 := workflow.Equals(workflow.Field("type"), workflow.Literal("success"))
+	got := workflow.And(cond1, cond2)
+	want := "${.status == 200 && .type == \"success\"}"
+	if got != want {
+		t.Errorf("And() = %q, want %q", got, want)
+	}
+}
+
+func TestOr(t *testing.T) {
+	cond1 := workflow.Equals(workflow.Field("status"), workflow.Number(200))
+	cond2 := workflow.Equals(workflow.Field("status"), workflow.Number(201))
+	got := workflow.Or(cond1, cond2)
+	want := "${.status == 200 || .status == 201}"
+	if got != want {
+		t.Errorf("Or() = %q, want %q", got, want)
+	}
+}
+
+func TestNot(t *testing.T) {
+	cond := workflow.Equals(workflow.Field("status"), workflow.Number(200))
+	got := workflow.Not(cond)
+	want := "${!(.status == 200)}"
+	if got != want {
+		t.Errorf("Not() = %q, want %q", got, want)
+	}
+}
+
+func TestConditionBuildersIntegration(t *testing.T) {
+	// Test complex condition composition
+	cond1 := workflow.Equals(workflow.Field("status"), workflow.Number(200))
+	cond2 := workflow.GreaterThanOrEqual(workflow.Field("count"), workflow.Number(5))
+	combined := workflow.And(cond1, cond2)
+
+	want := "${.status == 200 && .count >= 5}"
+	if combined != want {
+		t.Errorf("Complex condition = %q, want %q", combined, want)
 	}
 }
 
