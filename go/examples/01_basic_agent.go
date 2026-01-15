@@ -1,4 +1,5 @@
 //go:build ignore
+
 // Example 01: Basic Agent
 //
 // This example demonstrates creating a simple agent with just the required fields.
@@ -8,10 +9,14 @@ import (
 	"fmt"
 	"log"
 
+	stigmeragent "github.com/leftbin/stigmer-sdk/go"
 	"github.com/leftbin/stigmer-sdk/go/agent"
 )
 
 func main() {
+	// Enable auto-synthesis - agent will be written to manifest.pb on exit
+	defer stigmeragent.Complete()
+
 	// Create a basic agent with required fields only
 	basicAgent, err := agent.New(
 		agent.WithName("code-reviewer"),
@@ -44,9 +49,9 @@ func main() {
 	fmt.Printf("   IconURL: %s\n", fullAgent.IconURL)
 	fmt.Printf("   Org: %s\n", fullAgent.Org)
 
-	// Note: Proto conversion is handled by the CLI.
-	// The SDK provides user-friendly objects for defining agents.
-	// When you run `stigmer deploy`, the CLI will convert these to proto messages.
+	// Note: When using the SDK standalone (without CLI), you must call defer stigmeragent.Complete()
+	// to enable manifest generation. The CLI's "Copy & Patch" architecture automatically injects
+	// this when running via `stigmer up`, so CLI-based projects don't need it.
 
 	// Example of validation error
 	fmt.Println("\n❌ Attempting to create invalid agent:")

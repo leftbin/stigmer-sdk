@@ -88,17 +88,9 @@ func validateDocument(d *Document) error {
 		)
 	}
 
-	// Validate version (required, semver)
-	if d.Version == "" {
-		return NewValidationErrorWithCause(
-			"document.version",
-			d.Version,
-			"required",
-			"version is required",
-			ErrInvalidVersion,
-		)
-	}
-	if !semverRegex.MatchString(d.Version) {
+	// Validate version (if provided, must be semver)
+	// Note: Version is set to "0.1.0" by default in New() if not provided
+	if d.Version != "" && !semverRegex.MatchString(d.Version) {
 		return NewValidationErrorWithCause(
 			"document.version",
 			d.Version,

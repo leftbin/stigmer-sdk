@@ -1,5 +1,7 @@
 package workflow
 
+import "fmt"
+
 // TaskKind represents the type of workflow task.
 type TaskKind string
 
@@ -17,6 +19,13 @@ const (
 	TaskKindCallActivity TaskKind = "CALL_ACTIVITY"
 	TaskKindRaise        TaskKind = "RAISE"
 	TaskKindRun          TaskKind = "RUN"
+)
+
+// Special task flow control constants.
+const (
+	// EndFlow indicates the workflow should terminate after this task.
+	// Use task.End() method instead of task.Then(EndFlow) for better readability.
+	EndFlow = "end"
 )
 
 // Task represents a single task in a workflow.
@@ -42,23 +51,66 @@ type TaskConfig interface {
 	isTaskConfig()
 }
 
-// Export sets the export directive for this task.
+// Export sets the export directive for this task using a low-level expression.
+// For most use cases, prefer ExportAll() or ExportField() for better UX.
 // Example: task.Export("${.}") exports entire output.
 func (t *Task) Export(expr string) *Task {
 	t.ExportAs = expr
 	return t
 }
 
-// Then sets the flow control directive for this task.
+// ExportAll exports the entire task output to the workflow context.
+// This is a high-level helper that replaces Export("${.}").
+// Example: HttpCallTask("fetch",...).ExportAll()
+func (t *Task) ExportAll() *Task {
+	t.ExportAs = "${.}"
+	return t
+}
+
+// ExportField exports a specific field from the task output to the workflow context.
+// This is a high-level helper that replaces Export("${.field}").
+// Example: HttpCallTask("fetch",...).ExportField("count")
+func (t *Task) ExportField(fieldName string) *Task {
+	t.ExportAs = fmt.Sprintf("${.%s}", fieldName)
+	return t
+}
+
+// ExportFields exports multiple fields from the task output to the workflow context.
+// Each field is exported with its original name.
+// Example: HttpCallTask("fetch",...).ExportFields("count", "status", "data")
+func (t *Task) ExportFields(fieldNames ...string) *Task {
+	// For multiple fields, we export the whole object and let the next task
+	// access specific fields. This is more efficient than creating separate exports.
+	// In the future, we could support selective field export if the proto supports it.
+	t.ExportAs = "${.}"
+	return t
+}
+
+// Then sets the flow control directive for this task using a task name string.
 // Example: task.Then("nextTask") jumps to task named "nextTask".
+//
+// For type-safe task references, use ThenTask() instead.
 func (t *Task) Then(taskName string) *Task {
 	t.ThenTask = taskName
 	return t
 }
 
+// ThenRef sets the flow control directive using a task reference.
+// This is type-safe and prevents typos in task names.
+//
+// Example:
+//
+//	task1 := workflow.SetTask("init", workflow.SetInt("x", 1))
+//	task2 := workflow.HttpCallTask("fetch", ...).ThenRef(task1)
+func (t *Task) ThenRef(task *Task) *Task {
+	t.ThenTask = task.Name
+	return t
+}
+
 // End terminates the workflow after this task.
+// This is equivalent to task.Then(workflow.EndFlow) but more explicit.
 func (t *Task) End() *Task {
-	t.ThenTask = "end"
+	t.ThenTask = EndFlow
 	return t
 }
 
@@ -105,6 +157,7 @@ func SetTask(name string, opts ...SetTaskOption) *Task {
 type SetTaskOption func(*SetTaskConfig)
 
 // SetVar adds a variable to a SET task.
+// For better type safety, consider using SetInt, SetString, SetBool instead.
 func SetVar(key, value string) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
 		cfg.Variables[key] = value
@@ -117,6 +170,40 @@ func SetVars(vars map[string]string) SetTaskOption {
 		for k, v := range vars {
 			cfg.Variables[k] = v
 		}
+	}
+}
+
+// SetInt adds an integer variable to a SET task with automatic type conversion.
+// This is a high-level helper that provides better UX than SetVar("count", "0").
+// Example: SetTask("init", SetInt("count", 0))
+func SetInt(key string, value int) SetTaskOption {
+	return func(cfg *SetTaskConfig) {
+		cfg.Variables[key] = fmt.Sprintf("%d", value)
+	}
+}
+
+// SetString adds a string variable to a SET task.
+// This is semantically clearer than SetVar for string values.
+// Example: SetTask("init", SetString("status", "pending"))
+func SetString(key, value string) SetTaskOption {
+	return func(cfg *SetTaskConfig) {
+		cfg.Variables[key] = value
+	}
+}
+
+// SetBool adds a boolean variable to a SET task with automatic type conversion.
+// Example: SetTask("init", SetBool("enabled", true))
+func SetBool(key string, value bool) SetTaskOption {
+	return func(cfg *SetTaskConfig) {
+		cfg.Variables[key] = fmt.Sprintf("%t", value)
+	}
+}
+
+// SetFloat adds a float variable to a SET task with automatic type conversion.
+// Example: SetTask("init", SetFloat("price", 99.99))
+func SetFloat(key string, value float64) SetTaskOption {
+	return func(cfg *SetTaskConfig) {
+		cfg.Variables[key] = fmt.Sprintf("%f", value)
 	}
 }
 
@@ -319,7 +406,9 @@ func SwitchTask(name string, opts ...SwitchTaskOption) *Task {
 // SwitchTaskOption is a functional option for configuring SWITCH tasks.
 type SwitchTaskOption func(*SwitchTaskConfig)
 
-// WithCase adds a conditional case.
+// WithCase adds a conditional case using a task name string.
+// For type-safe task references, use WithCaseRef instead.
+// Example: WithCase("${.status == 200}", "handleSuccess")
 func WithCase(condition, then string) SwitchTaskOption {
 	return func(cfg *SwitchTaskConfig) {
 		cfg.Cases = append(cfg.Cases, SwitchCase{
@@ -329,10 +418,33 @@ func WithCase(condition, then string) SwitchTaskOption {
 	}
 }
 
-// WithDefault sets the default task.
+// WithCaseRef adds a conditional case using a task reference.
+// This is type-safe and prevents typos in task names.
+// Example: WithCaseRef("${.status == 200}", successTask)
+func WithCaseRef(condition string, task *Task) SwitchTaskOption {
+	return func(cfg *SwitchTaskConfig) {
+		cfg.Cases = append(cfg.Cases, SwitchCase{
+			Condition: condition,
+			Then:      task.Name,
+		})
+	}
+}
+
+// WithDefault sets the default task using a task name string.
+// For type-safe task references, use WithDefaultRef instead.
+// Example: WithDefault("handleError")
 func WithDefault(task string) SwitchTaskOption {
 	return func(cfg *SwitchTaskConfig) {
 		cfg.DefaultTask = task
+	}
+}
+
+// WithDefaultRef sets the default task using a task reference.
+// This is type-safe and prevents typos in task names.
+// Example: WithDefaultRef(errorTask)
+func WithDefaultRef(task *Task) SwitchTaskOption {
+	return func(cfg *SwitchTaskConfig) {
+		cfg.DefaultTask = task.Name
 	}
 }
 
@@ -779,4 +891,33 @@ func WithWorkflowInput(input map[string]any) RunTaskOption {
 	return func(cfg *RunTaskConfig) {
 		cfg.Input = input
 	}
+}
+
+// ============================================================================
+// Variable Interpolation Helpers
+// ============================================================================
+
+// VarRef creates a reference to a workflow variable.
+// This is a high-level helper that replaces manual "${varName}" syntax.
+// Example: WithURI(VarRef("apiURL") + "/data") instead of WithURI("${apiURL}/data")
+func VarRef(varName string) string {
+	return fmt.Sprintf("${%s}", varName)
+}
+
+// FieldRef creates a reference to a field in the current context.
+// This is a high-level helper that replaces manual "${.field}" syntax.
+// Example: SetVar("count", FieldRef("count")) instead of SetVar("count", "${.count}")
+func FieldRef(fieldPath string) string {
+	return fmt.Sprintf("${.%s}", fieldPath)
+}
+
+// Interpolate combines static text with variable references.
+// This provides a cleaner way to build strings with variable interpolation.
+// Example: Interpolate(VarRef("apiURL"), "/data") instead of "${apiURL}/data"
+func Interpolate(parts ...string) string {
+	result := ""
+	for _, part := range parts {
+		result += part
+	}
+	return result
 }

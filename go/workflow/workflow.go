@@ -42,20 +42,24 @@ type Option func(*Workflow) error
 // New creates a new Workflow with the given options.
 //
 // The workflow is automatically registered in the global registry for synthesis.
-// When the program exits and defer synth.AutoSynth() is called, this workflow
+// When the program exits and defer stigmeragent.Complete() is called, this workflow
 // will be converted to a manifest proto and written to disk.
 //
 // Required options:
 //   - WithNamespace: workflow namespace
 //   - WithName: workflow name
-//   - WithVersion: workflow version (semver)
+//
+// Optional (with defaults):
+//   - WithVersion: workflow version (defaults to "0.1.0" if not provided)
+//   - WithDescription: human-readable description
+//   - WithOrg: organization identifier
 //
 // Example:
 //
 //	workflow, err := workflow.New(
 //	    workflow.WithNamespace("data-processing"),
 //	    workflow.WithName("daily-sync"),
-//	    workflow.WithVersion("1.0.0"),
+//	    workflow.WithVersion("1.0.0"),  // Optional
 //	    workflow.WithDescription("Sync data from external API daily"),
 //	)
 //	if err != nil {
@@ -75,6 +79,11 @@ func New(opts ...Option) (*Workflow, error) {
 		if err := opt(w); err != nil {
 			return nil, err
 		}
+	}
+
+	// Auto-generate version if not provided
+	if w.Document.Version == "" {
+		w.Document.Version = "0.1.0" // Default version for development
 	}
 
 	// Validate the workflow

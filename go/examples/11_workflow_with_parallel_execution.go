@@ -4,7 +4,7 @@ package main
 import (
 	"log"
 
-	"github.com/leftbin/stigmer-sdk/go/synthesis"
+	stigmeragent "github.com/leftbin/stigmer-sdk/go"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -16,7 +16,7 @@ import (
 // 3. Each branch processes data independently
 // 4. Joins results and aggregates
 func main() {
-	defer synthesis.AutoSynth()
+	defer stigmeragent.Complete()
 
 	wf, err := workflow.New(
 		workflow.WithNamespace("data-processing"),
@@ -28,13 +28,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Task 1: Fetch data to process
+	// Task 1: Fetch data to process using high-level helper
 	wf.AddTask(workflow.HttpCallTask("fetchData",
 		workflow.WithMethod("GET"),
 		workflow.WithURI("https://api.example.com/data"),
-	).Export("${.}"))
+	).ExportAll())
 
-	// Task 2: Fork into parallel branches
+	// Task 2: Fork into parallel branches using field references and type-safe setters
 	wf.AddTask(workflow.ForkTask("parallelProcessing",
 		// Branch 1: Process analytics
 		workflow.WithBranch("analytics",
@@ -42,13 +42,13 @@ func main() {
 				workflow.WithMethod("POST"),
 				workflow.WithURI("https://api.example.com/analytics"),
 				workflow.WithBody(map[string]any{
-					"data": "${.data}",
+					"data": workflow.FieldRef("data"),
 					"type": "analytics",
 				}),
-			).Export("${.analytics}"),
+			).ExportField("analytics"),
 
 			workflow.SetTask("storeAnalytics",
-				workflow.SetVar("analyticsComplete", "true"),
+				workflow.SetBool("analyticsComplete", true),
 			),
 		),
 
@@ -58,12 +58,12 @@ func main() {
 				workflow.WithMethod("POST"),
 				workflow.WithURI("https://api.example.com/validate"),
 				workflow.WithBody(map[string]any{
-					"data": "${.data}",
+					"data": workflow.FieldRef("data"),
 				}),
-			).Export("${.validationResult}"),
+			).ExportField("validationResult"),
 
 			workflow.SetTask("storeValidation",
-				workflow.SetVar("validationComplete", "true"),
+				workflow.SetBool("validationComplete", true),
 			),
 		),
 
@@ -73,13 +73,13 @@ func main() {
 				workflow.WithMethod("POST"),
 				workflow.WithURI("https://api.example.com/transform"),
 				workflow.WithBody(map[string]any{
-					"data":   "${.data}",
+					"data":   workflow.FieldRef("data"),
 					"format": "json",
 				}),
-			).Export("${.transformed}"),
+			).ExportField("transformed"),
 
 			workflow.SetTask("storeTransformed",
-				workflow.SetVar("transformationComplete", "true"),
+				workflow.SetBool("transformationComplete", true),
 			),
 		),
 
@@ -90,35 +90,35 @@ func main() {
 				workflow.WithURI("https://api.example.com/notify"),
 				workflow.WithBody(map[string]any{
 					"message": "Processing started",
-					"dataId":  "${.data.id}",
+					"dataId":  workflow.FieldRef("data.id"),
 				}),
 			),
 
 			workflow.SetTask("markNotified",
-				workflow.SetVar("notificationSent", "true"),
+				workflow.SetBool("notificationSent", true),
 			),
 		),
 	))
 
-	// Task 3: Aggregate results (after all branches complete)
+	// Task 3: Aggregate results (after all branches complete) using variable references
 	wf.AddTask(workflow.SetTask("aggregateResults",
-		workflow.SetVar("status", "completed"),
-		workflow.SetVar("analyticsStatus", "${analyticsComplete}"),
-		workflow.SetVar("validationStatus", "${validationComplete}"),
-		workflow.SetVar("transformationStatus", "${transformationComplete}"),
-		workflow.SetVar("notificationStatus", "${notificationSent}"),
+		workflow.SetString("status", "completed"),
+		workflow.SetVar("analyticsStatus", workflow.VarRef("analyticsComplete")),
+		workflow.SetVar("validationStatus", workflow.VarRef("validationComplete")),
+		workflow.SetVar("transformationStatus", workflow.VarRef("transformationComplete")),
+		workflow.SetVar("notificationStatus", workflow.VarRef("notificationSent")),
 	))
 
-	// Task 4: Send completion notification
+	// Task 4: Send completion notification using variable references
 	wf.AddTask(workflow.HttpCallTask("sendCompletion",
 		workflow.WithMethod("POST"),
 		workflow.WithURI("https://api.example.com/completion"),
 		workflow.WithBody(map[string]any{
-			"status":  "${status}",
+			"status": workflow.VarRef("status"),
 			"results": map[string]any{
-				"analytics":      "${analytics}",
-				"validation":     "${validationResult}",
-				"transformation": "${transformed}",
+				"analytics":      workflow.VarRef("analytics"),
+				"validation":     workflow.VarRef("validationResult"),
+				"transformation": workflow.VarRef("transformed"),
 			},
 		}),
 	))

@@ -316,3 +316,229 @@ func TestRunTask(t *testing.T) {
 		t.Errorf("RunTask() workflow = %q, want %q", cfg.WorkflowName, "data-processor")
 	}
 }
+
+// ============================================================================
+// Tests for High-Level Helpers (UX Improvements)
+// ============================================================================
+
+func TestTask_ExportAll(t *testing.T) {
+	task := workflow.HttpCallTask("fetch", workflow.WithMethod("GET"), workflow.WithURI("https://api.example.com"))
+	task.ExportAll()
+
+	if task.ExportAs != "${.}" {
+		t.Errorf("ExportAll() set exportAs = %q, want %q", task.ExportAs, "${.}")
+	}
+}
+
+func TestTask_ExportField(t *testing.T) {
+	task := workflow.HttpCallTask("fetch", workflow.WithMethod("GET"), workflow.WithURI("https://api.example.com"))
+	task.ExportField("count")
+
+	if task.ExportAs != "${.count}" {
+		t.Errorf("ExportField() set exportAs = %q, want %q", task.ExportAs, "${.count}")
+	}
+}
+
+func TestTask_ExportFields(t *testing.T) {
+	task := workflow.HttpCallTask("fetch", workflow.WithMethod("GET"), workflow.WithURI("https://api.example.com"))
+	task.ExportFields("count", "status", "data")
+
+	// For now, ExportFields exports everything (${.})
+	// In the future, it could support selective field export
+	if task.ExportAs != "${.}" {
+		t.Errorf("ExportFields() set exportAs = %q, want %q", task.ExportAs, "${.}")
+	}
+}
+
+func TestSetInt(t *testing.T) {
+	task := workflow.SetTask("init",
+		workflow.SetInt("count", 42),
+		workflow.SetInt("retries", 0),
+	)
+
+	cfg, ok := task.Config.(*workflow.SetTaskConfig)
+	if !ok {
+		t.Fatal("SetInt() config type is not *SetTaskConfig")
+	}
+
+	if cfg.Variables["count"] != "42" {
+		t.Errorf("SetInt() count = %q, want %q", cfg.Variables["count"], "42")
+	}
+
+	if cfg.Variables["retries"] != "0" {
+		t.Errorf("SetInt() retries = %q, want %q", cfg.Variables["retries"], "0")
+	}
+}
+
+func TestSetString(t *testing.T) {
+	task := workflow.SetTask("init",
+		workflow.SetString("status", "pending"),
+		workflow.SetString("message", "Processing..."),
+	)
+
+	cfg, ok := task.Config.(*workflow.SetTaskConfig)
+	if !ok {
+		t.Fatal("SetString() config type is not *SetTaskConfig")
+	}
+
+	if cfg.Variables["status"] != "pending" {
+		t.Errorf("SetString() status = %q, want %q", cfg.Variables["status"], "pending")
+	}
+
+	if cfg.Variables["message"] != "Processing..." {
+		t.Errorf("SetString() message = %q, want %q", cfg.Variables["message"], "Processing...")
+	}
+}
+
+func TestSetBool(t *testing.T) {
+	task := workflow.SetTask("init",
+		workflow.SetBool("enabled", true),
+		workflow.SetBool("debug", false),
+	)
+
+	cfg, ok := task.Config.(*workflow.SetTaskConfig)
+	if !ok {
+		t.Fatal("SetBool() config type is not *SetTaskConfig")
+	}
+
+	if cfg.Variables["enabled"] != "true" {
+		t.Errorf("SetBool() enabled = %q, want %q", cfg.Variables["enabled"], "true")
+	}
+
+	if cfg.Variables["debug"] != "false" {
+		t.Errorf("SetBool() debug = %q, want %q", cfg.Variables["debug"], "false")
+	}
+}
+
+func TestSetFloat(t *testing.T) {
+	task := workflow.SetTask("init",
+		workflow.SetFloat("price", 99.99),
+		workflow.SetFloat("tax", 0.08),
+	)
+
+	cfg, ok := task.Config.(*workflow.SetTaskConfig)
+	if !ok {
+		t.Fatal("SetFloat() config type is not *SetTaskConfig")
+	}
+
+	if cfg.Variables["price"] != "99.990000" {
+		t.Errorf("SetFloat() price = %q, want %q", cfg.Variables["price"], "99.990000")
+	}
+
+	if cfg.Variables["tax"] != "0.080000" {
+		t.Errorf("SetFloat() tax = %q, want %q", cfg.Variables["tax"], "0.080000")
+	}
+}
+
+func TestVarRef(t *testing.T) {
+	result := workflow.VarRef("apiURL")
+	expected := "${apiURL}"
+
+	if result != expected {
+		t.Errorf("VarRef() = %q, want %q", result, expected)
+	}
+}
+
+func TestFieldRef(t *testing.T) {
+	result := workflow.FieldRef("count")
+	expected := "${.count}"
+
+	if result != expected {
+		t.Errorf("FieldRef() = %q, want %q", result, expected)
+	}
+
+	// Test nested field path
+	result = workflow.FieldRef("response.data.count")
+	expected = "${.response.data.count}"
+
+	if result != expected {
+		t.Errorf("FieldRef() with nested path = %q, want %q", result, expected)
+	}
+}
+
+func TestInterpolate(t *testing.T) {
+	// Test basic interpolation
+	result := workflow.Interpolate(workflow.VarRef("apiURL"), "/data")
+	expected := "${apiURL}/data"
+
+	if result != expected {
+		t.Errorf("Interpolate() = %q, want %q", result, expected)
+	}
+
+	// Test multiple parts
+	result = workflow.Interpolate("Bearer ", workflow.VarRef("API_TOKEN"))
+	expected = "Bearer ${API_TOKEN}"
+
+	if result != expected {
+		t.Errorf("Interpolate() with Bearer = %q, want %q", result, expected)
+	}
+
+	// Test complex interpolation
+	result = workflow.Interpolate(
+		"https://",
+		workflow.VarRef("domain"),
+		"/api/v1/users/",
+		workflow.FieldRef("userId"),
+	)
+	expected = "https://${domain}/api/v1/users/${.userId}"
+
+	if result != expected {
+		t.Errorf("Interpolate() complex = %q, want %q", result, expected)
+	}
+}
+
+func TestHighLevelHelpersIntegration(t *testing.T) {
+	// Test a complete workflow using all new helpers
+	task := workflow.HttpCallTask("fetchUser",
+		workflow.WithMethod("GET"),
+		workflow.WithURI(workflow.Interpolate(workflow.VarRef("apiURL"), "/users/", workflow.FieldRef("userId"))),
+		workflow.WithHeader("Authorization", workflow.Interpolate("Bearer ", workflow.VarRef("API_TOKEN"))),
+	).ExportField("name")
+
+	cfg, ok := task.Config.(*workflow.HttpCallTaskConfig)
+	if !ok {
+		t.Fatal("Integration test: config type is not *HttpCallTaskConfig")
+	}
+
+	expectedURI := "${apiURL}/users/${.userId}"
+	if cfg.URI != expectedURI {
+		t.Errorf("Integration test: URI = %q, want %q", cfg.URI, expectedURI)
+	}
+
+	expectedAuth := "Bearer ${API_TOKEN}"
+	if cfg.Headers["Authorization"] != expectedAuth {
+		t.Errorf("Integration test: Authorization = %q, want %q", cfg.Headers["Authorization"], expectedAuth)
+	}
+
+	expectedExport := "${.name}"
+	if task.ExportAs != expectedExport {
+		t.Errorf("Integration test: exportAs = %q, want %q", task.ExportAs, expectedExport)
+	}
+}
+
+func TestTask_ThenRef(t *testing.T) {
+	// Test type-safe task references
+	task1 := workflow.SetTask("init", workflow.SetInt("x", 1))
+	task2 := workflow.SetTask("process", workflow.SetInt("y", 2))
+	
+	task1.ThenRef(task2)
+
+	if task1.ThenTask != "process" {
+		t.Errorf("ThenRef() set thenTask = %q, want %q", task1.ThenTask, "process")
+	}
+}
+
+func TestTask_EndFlow(t *testing.T) {
+	// Test End() uses the EndFlow constant
+	task := workflow.SetTask("final", workflow.SetString("status", "done"))
+	task.End()
+
+	if task.ThenTask != workflow.EndFlow {
+		t.Errorf("End() set thenTask = %q, want %q", task.ThenTask, workflow.EndFlow)
+	}
+
+	// Verify EndFlow constant value
+	if workflow.EndFlow != "end" {
+		t.Errorf("EndFlow constant = %q, want %q", workflow.EndFlow, "end")
+	}
+}

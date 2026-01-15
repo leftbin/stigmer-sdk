@@ -4,7 +4,7 @@ package main
 import (
 	"log"
 
-	"github.com/leftbin/stigmer-sdk/go/synthesis"
+	stigmeragent "github.com/leftbin/stigmer-sdk/go"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -16,7 +16,7 @@ import (
 // 3. Processes each item individually
 // 4. Aggregates results
 func main() {
-	defer synthesis.AutoSynth()
+	defer stigmeragent.Complete()
 
 	wf, err := workflow.New(
 		workflow.WithNamespace("data-processing"),
@@ -28,31 +28,31 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Task 1: Fetch list of items
+	// Task 1: Fetch list of items using high-level helper
 	wf.AddTask(workflow.HttpCallTask("fetchItems",
 		workflow.WithMethod("GET"),
 		workflow.WithURI("https://api.example.com/items"),
-	).Export("${.items}"))
+	).ExportField("items"))
 
-	// Task 2: Initialize counter
+	// Task 2: Initialize counter using type-safe setters
 	wf.AddTask(workflow.SetTask("initCounter",
-		workflow.SetVar("processedCount", "0"),
-		workflow.SetVar("failedCount", "0"),
+		workflow.SetInt("processedCount", 0),
+		workflow.SetInt("failedCount", 0),
 	))
 
-	// Task 3: Process each item in a loop
+	// Task 3: Process each item in a loop using field references
 	wf.AddTask(workflow.ForTask("processEachItem",
-		workflow.WithIn("${.items}"),
+		workflow.WithIn(workflow.FieldRef("items")),
 		workflow.WithDo(
-			// Process current item
+			// Process current item using field references
 			workflow.HttpCallTask("processItem",
 				workflow.WithMethod("POST"),
 				workflow.WithURI("https://api.example.com/process"),
 				workflow.WithBody(map[string]any{
-					"itemId":   "${.id}",
-					"itemData": "${.data}",
+					"itemId":   workflow.FieldRef("id"),
+					"itemData": workflow.FieldRef("data"),
 				}),
-			).Export("${.result}"),
+			).ExportField("result"),
 
 			// Update counter based on result
 			workflow.SwitchTask("checkResult",
@@ -70,11 +70,11 @@ func main() {
 		),
 	))
 
-	// Task 4: Aggregate results
+	// Task 4: Aggregate results using variable references
 	wf.AddTask(workflow.SetTask("aggregateResults",
-		workflow.SetVar("totalProcessed", "${processedCount}"),
-		workflow.SetVar("totalFailed", "${failedCount}"),
-		workflow.SetVar("status", "completed"),
+		workflow.SetVar("totalProcessed", workflow.VarRef("processedCount")),
+		workflow.SetVar("totalFailed", workflow.VarRef("failedCount")),
+		workflow.SetString("status", "completed"),
 	))
 
 	log.Printf("Created loop workflow: %s", wf)

@@ -4,7 +4,7 @@ package main
 import (
 	"log"
 
-	"github.com/leftbin/stigmer-sdk/go/synthesis"
+	stigmeragent "github.com/leftbin/stigmer-sdk/go"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -16,7 +16,7 @@ import (
 // 3. Catches validation errors separately
 // 4. Logs errors and continues execution
 func main() {
-	defer synthesis.AutoSynth()
+	defer stigmeragent.Complete()
 
 	wf, err := workflow.New(
 		workflow.WithNamespace("data-processing"),
@@ -28,13 +28,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Task 1: Initialize
+	// Task 1: Initialize using type-safe setters
 	wf.AddTask(workflow.SetTask("initialize",
-		workflow.SetVar("retryCount", "0"),
-		workflow.SetVar("maxRetries", "3"),
+		workflow.SetInt("retryCount", 0),
+		workflow.SetInt("maxRetries", 3),
 	))
 
-	// Task 2: Try risky operation with error handling
+	// Task 2: Try risky operation with error handling using high-level helpers
 	wf.AddTask(workflow.TryTask("attemptDataFetch",
 		// Try block - risky operation
 		workflow.WithTry(
@@ -42,39 +42,39 @@ func main() {
 				workflow.WithMethod("GET"),
 				workflow.WithURI("https://api.example.com/data"),
 				workflow.WithTimeout(10),
-			).Export("${.}"),
+			).ExportAll(),
 		),
 
-		// Catch network errors
+		// Catch network errors using type-safe boolean
 		workflow.WithCatch(
 			[]string{"NetworkError", "TimeoutError"},
 			"networkErr",
 			workflow.SetTask("handleNetworkError",
-				workflow.SetVar("errorType", "network"),
+				workflow.SetString("errorType", "network"),
 				workflow.SetVar("errorMessage", "${networkErr.message}"),
-				workflow.SetVar("shouldRetry", "true"),
+				workflow.SetBool("shouldRetry", true),
 			).Then("checkRetry"),
 		),
 
-		// Catch validation errors
+		// Catch validation errors using type-safe boolean
 		workflow.WithCatch(
 			[]string{"ValidationError"},
 			"validationErr",
 			workflow.SetTask("handleValidationError",
-				workflow.SetVar("errorType", "validation"),
+				workflow.SetString("errorType", "validation"),
 				workflow.SetVar("errorMessage", "${validationErr.message}"),
-				workflow.SetVar("shouldRetry", "false"),
+				workflow.SetBool("shouldRetry", false),
 			).Then("logError"),
 		),
 
-		// Catch all other errors
+		// Catch all other errors using type-safe boolean
 		workflow.WithCatch(
 			[]string{"*"},
 			"err",
 			workflow.SetTask("handleUnknownError",
-				workflow.SetVar("errorType", "unknown"),
+				workflow.SetString("errorType", "unknown"),
 				workflow.SetVar("errorMessage", "${err.message}"),
-				workflow.SetVar("shouldRetry", "false"),
+				workflow.SetBool("shouldRetry", false),
 			).Then("logError"),
 		),
 	))
@@ -95,21 +95,21 @@ func main() {
 		workflow.WithDuration("5s"),
 	).Then("attemptDataFetch"))
 
-	// Task 6: Log error
+	// Task 6: Log error using variable references
 	wf.AddTask(workflow.HttpCallTask("logError",
 		workflow.WithMethod("POST"),
 		workflow.WithURI("https://api.example.com/logs"),
 		workflow.WithBody(map[string]any{
-			"errorType":    "${errorType}",
-			"errorMessage": "${errorMessage}",
-			"retryCount":   "${retryCount}",
+			"errorType":    workflow.VarRef("errorType"),
+			"errorMessage": workflow.VarRef("errorMessage"),
+			"retryCount":   workflow.VarRef("retryCount"),
 		}),
 	))
 
-	// Task 7: Continue with graceful degradation
+	// Task 7: Continue with graceful degradation using type-safe setters
 	wf.AddTask(workflow.SetTask("gracefulDegradation",
-		workflow.SetVar("status", "partial_failure"),
-		workflow.SetVar("message", "Operation failed but workflow continued"),
+		workflow.SetString("status", "partial_failure"),
+		workflow.SetString("message", "Operation failed but workflow continued"),
 	))
 
 	log.Printf("Created error handling workflow: %s", wf)
