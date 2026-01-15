@@ -101,10 +101,19 @@ Add to learning log when:
 ## 📊 Documentation Coverage
 
 Current topics covered:
-- ✅ Learning log (active) - 4 major entries (proto-agnostic, file-based, inline resources, builder pattern)
+- ✅ Learning log (active) - 8+ major entries including:
+  - Proto-agnostic architecture
+  - File-based content loading
+  - Inline resources pattern
+  - Builder pattern methods
+  - **Workflow SDK implementation** (12 task types) ⭐ NEW
+  - **Fluent API patterns** (method chaining) ⭐ NEW
+  - **Task-specific validation** (type assertions) ⭐ NEW
+  - **Registry integration** (multi-resource support) ⭐ NEW
 - ✅ Proto-agnostic architecture (complete) - Core architectural pattern
 - ⏳ Proto converters (TODO - CLI-side only, as patterns emerge)
 - ⏳ Agent configuration (TODO - as patterns emerge)
+- ⏳ Workflow configuration (TODO - as patterns emerge) ⭐ NEW
 - ⏳ Testing patterns (TODO - as patterns emerge)
 - ⏳ Error handling (TODO - as patterns emerge)
 
