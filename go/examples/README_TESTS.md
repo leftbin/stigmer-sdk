@@ -15,7 +15,7 @@ This directory contains comprehensive test cases for all SDK examples to ensure 
 
 **Status**: 6/6 passing ✅
 
-### Workflow Examples (Known Issues ❌)
+### Workflow Examples (All Passing ✅)
 
 - `TestExample07_BasicWorkflow` - Tests basic workflow with HTTP calls and variable setting
 - `TestExample08_WorkflowWithConditionals` - Tests workflows with SWITCH tasks for conditional logic
@@ -23,28 +23,27 @@ This directory contains comprehensive test cases for all SDK examples to ensure 
 - `TestExample10_WorkflowWithErrorHandling` - Tests workflows with TRY/CATCH error handling
 - `TestExample11_WorkflowWithParallelExecution` - Tests workflows with FORK tasks for parallel execution
 
-**Status**: 0/5 passing (SDK bug)
+**Status**: 5/5 passing ✅
 
-## Known Issues
+## Fixed Issues
 
-### Workflow Proto Conversion Error
+### Workflow Proto Conversion Error (RESOLVED ✅)
 
-All workflow examples are currently failing with:
+**Previous Issue**: Workflow examples were failing with protobuf conversion errors.
 
-```
-proto: invalid type: map[string]string
-```
+**Root Cause**: The SDK's workflow synthesis code could not convert certain Go types to protobuf `Struct`:
+1. `map[string]string` types (Variables, Headers)
+2. `[]map[string]interface{}` slices (SWITCH cases, FOR tasks, FORK branches, TRY catch blocks)
+3. `[]string` slices (TRY error lists)
+4. `workflow.TaskKind` enum types
 
-**Root Cause**: The SDK's workflow synthesis code cannot convert Go `map[string]string` types to protobuf `Struct`. This affects:
+**Fix Applied**: Updated `go/internal/synth/workflow_converter.go` with helper functions:
+- `stringMapToInterface()` - Converts `map[string]string` to `map[string]interface{}`
+- `mapSliceToInterfaceSlice()` - Converts `[]map[string]interface{}` to `[]interface{}`
+- `stringSliceToInterfaceSlice()` - Converts `[]string` to `[]interface{}`
+- Type conversions for enum values (e.g., `string(taskKind)`)
 
-1. `SetTaskConfig.Variables` (map[string]string) - Used in SET tasks
-2. `HttpCallTaskConfig.Headers` (map[string]string) - Used in HTTP_CALL tasks
-
-**Location**: `go/workflow/task.go` lines 128 and 221
-
-**Impact**: All workflow examples fail during manifest synthesis
-
-**Fix Required**: The `go/internal/synth/workflow_converter.go` needs to be updated to convert these maps to `google.protobuf.Struct` or appropriate protobuf types before marshaling.
+**Result**: All workflow examples now pass successfully (11/11 tests passing).
 
 ## Running Tests
 
@@ -58,7 +57,7 @@ go test -v -run TestExample01
 # Run only agent tests (currently passing)
 go test -v -run 'TestExample0[1-6]'
 
-# Run only workflow tests (currently failing)
+# Run only workflow tests (now passing)
 go test -v -run 'TestExample0[7-9]|TestExample1[01]'
 ```
 

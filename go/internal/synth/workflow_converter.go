@@ -194,6 +194,19 @@ func mapSliceToInterfaceSlice(slice []map[string]interface{}) []interface{} {
 	return result
 }
 
+// stringSliceToInterfaceSlice converts []string to []interface{}.
+// This is needed because structpb.NewStruct cannot handle []string directly in nested structures.
+func stringSliceToInterfaceSlice(slice []string) []interface{} {
+	if slice == nil {
+		return nil
+	}
+	result := make([]interface{}, len(slice))
+	for i, s := range slice {
+		result[i] = s
+	}
+	return result
+}
+
 // taskConfigToStruct converts task configuration to google.protobuf.Struct.
 func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 	var configMap map[string]interface{}
@@ -245,7 +258,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 		for i, t := range cfg.Do {
 			doTasks[i] = map[string]interface{}{
 				"name": t.Name,
-				"kind": t.Kind,
+				"kind": string(t.Kind), // Convert TaskKind enum to string
 			}
 		}
 		configMap = map[string]interface{}{
@@ -270,7 +283,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 		catchBlocks := make([]map[string]interface{}, len(cfg.Catch))
 		for i, c := range cfg.Catch {
 			catchBlocks[i] = map[string]interface{}{
-				"errors": c.Errors,
+				"errors": stringSliceToInterfaceSlice(c.Errors), // Convert []string to []interface{}
 				"as":     c.As,
 			}
 		}
