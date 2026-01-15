@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package examples demonstrates workflow loops using FOR tasks.
 package main
 
@@ -32,16 +34,6 @@ import (
 // - FOR loop iteration over collections with type-safe task chaining
 func main() {
 	defer stigmeragent.Complete()
-
-	wf, err := workflow.New(
-		workflow.WithNamespace("data-processing"),
-		workflow.WithName("batch-processing"),
-		workflow.WithVersion("1.0.0"),
-		workflow.WithDescription("Process multiple items in a loop"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Task 1: Fetch list of items from API
 	// ExportField("items") extracts the "items" field from response and makes it available to next task
@@ -134,14 +126,17 @@ func main() {
 	initTask.ThenRef(processTask)
 	processTask.ThenRef(aggregateTask)
 
-	// Add all tasks to the workflow
-	wf.AddTask(fetchTask).
-		AddTask(initTask).
-		AddTask(processTask).
-		AddTask(checkResultTask).
-		AddTask(incrementSuccessTask).
-		AddTask(incrementFailedTask).
-		AddTask(aggregateTask)
+	// Create workflow with all tasks
+	wf, err := workflow.New(
+		workflow.WithNamespace("data-processing"),
+		workflow.WithName("batch-processor"),
+		workflow.WithVersion("1.0.0"),
+		workflow.WithDescription("Process multiple items in a loop"),
+		workflow.WithTasks(fetchTask, initTask, processTask, checkResultTask, incrementSuccessTask, incrementFailedTask, aggregateTask),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("Created loop workflow: %s", wf)
 }

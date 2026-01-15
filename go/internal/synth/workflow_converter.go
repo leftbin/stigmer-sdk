@@ -168,6 +168,32 @@ func taskKindToProtoKind(kind workflow.TaskKind) apiresource.WorkflowTaskKind {
 	return kindMap[kind]
 }
 
+// stringMapToInterface converts map[string]string to map[string]interface{}.
+// This is needed because structpb.NewStruct cannot handle map[string]string directly.
+func stringMapToInterface(m map[string]string) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+	return result
+}
+
+// mapSliceToInterfaceSlice converts []map[string]interface{} to []interface{}.
+// This is needed because structpb.NewStruct cannot handle []map[string]interface{} directly.
+func mapSliceToInterfaceSlice(slice []map[string]interface{}) []interface{} {
+	if slice == nil {
+		return nil
+	}
+	result := make([]interface{}, len(slice))
+	for i, m := range slice {
+		result[i] = m
+	}
+	return result
+}
+
 // taskConfigToStruct converts task configuration to google.protobuf.Struct.
 func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 	var configMap map[string]interface{}
@@ -176,7 +202,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 	case workflow.TaskKindSet:
 		cfg := task.Config.(*workflow.SetTaskConfig)
 		configMap = map[string]interface{}{
-			"variables": cfg.Variables,
+			"variables": stringMapToInterface(cfg.Variables),
 		}
 
 	case workflow.TaskKindHttpCall:
@@ -186,7 +212,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 			"endpoint": map[string]interface{}{
 				"uri": cfg.URI,
 			},
-			"headers":         cfg.Headers,
+			"headers":         stringMapToInterface(cfg.Headers),
 			"body":            cfg.Body,
 			"timeout_seconds": cfg.TimeoutSeconds,
 		}
@@ -209,7 +235,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 			}
 		}
 		configMap = map[string]interface{}{
-			"cases":   cases,
+			"cases":   mapSliceToInterfaceSlice(cases),
 			"default": cfg.DefaultTask,
 		}
 
@@ -224,7 +250,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 		}
 		configMap = map[string]interface{}{
 			"in": cfg.In,
-			"do": doTasks,
+			"do": mapSliceToInterfaceSlice(doTasks),
 		}
 
 	case workflow.TaskKindFork:
@@ -236,7 +262,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 			}
 		}
 		configMap = map[string]interface{}{
-			"branches": branches,
+			"branches": mapSliceToInterfaceSlice(branches),
 		}
 
 	case workflow.TaskKindTry:
@@ -249,7 +275,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 			}
 		}
 		configMap = map[string]interface{}{
-			"catch": catchBlocks,
+			"catch": mapSliceToInterfaceSlice(catchBlocks),
 		}
 
 	case workflow.TaskKindListen:

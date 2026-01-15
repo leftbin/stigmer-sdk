@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package examples demonstrates parallel execution using FORK tasks.
 package main
 
@@ -29,22 +31,12 @@ import (
 func main() {
 	defer stigmeragent.Complete()
 
-	wf, err := workflow.New(
-		workflow.WithNamespace("data-processing"),
-		workflow.WithName("parallel-processing"),
-		workflow.WithVersion("1.0.0"),
-		workflow.WithDescription("Process data in parallel branches"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Task 1: Fetch data to process
 	// ExportAll() makes entire response available to parallel branches
-	wf.AddTask(workflow.HttpCallTask("fetchData",
+	fetchTask := workflow.HttpCallTask("fetchData",
 		workflow.WithHTTPGet(), // Type-safe HTTP method
 		workflow.WithURI("https://api.example.com/data"),
-	).ExportAll()) // All branches can access this data via FieldRef("data")
+	).ExportAll() // All branches can access this data via FieldRef("data")
 
 	// Task 2: Fork into 4 parallel branches
 	//
@@ -60,7 +52,7 @@ func main() {
 	//   aggregateResults (collect all branch results)
 	//        ↓
 	//   sendCompletion (POST /completion with aggregated data)
-	wf.AddTask(workflow.ForkTask("parallelProcessing",
+	forkTask := workflow.ForkTask("parallelProcessing",
 		// Branch 1: Analytics processing (runs concurrently with other branches)
 		workflow.WithBranch("analytics",
 			workflow.HttpCallTask("computeAnalytics",
@@ -123,21 +115,21 @@ func main() {
 				workflow.SetBool("notificationSent", true), // ✅ Mark branch complete
 			),
 		),
-	))
+	)
 
 	// Task 3: Aggregate results (executes after ALL parallel branches complete)
 	// VarRef reads the variables set by each branch
-	wf.AddTask(workflow.SetTask("aggregateResults",
+	aggregateTask := workflow.SetTask("aggregateResults",
 		workflow.SetString("status", "completed"),
 		workflow.SetVar("analyticsStatus", workflow.VarRef("analyticsComplete")),           // ✅ From branch 1
 		workflow.SetVar("validationStatus", workflow.VarRef("validationComplete")),         // ✅ From branch 2
 		workflow.SetVar("transformationStatus", workflow.VarRef("transformationComplete")), // ✅ From branch 3
 		workflow.SetVar("notificationStatus", workflow.VarRef("notificationSent")),         // ✅ From branch 4
-	))
+	)
 
 	// Task 4: Send completion notification with all results
 	// VarRef accesses both status variables and exported results from branches
-	wf.AddTask(workflow.HttpCallTask("sendCompletion",
+	completionTask := workflow.HttpCallTask("sendCompletion",
 		workflow.WithHTTPPost(), // Type-safe HTTP method
 		workflow.WithURI("https://api.example.com/completion"),
 		workflow.WithBody(map[string]any{
@@ -148,7 +140,24 @@ func main() {
 				"transformation": workflow.VarRef("transformed"),      // ✅ From transformation branch
 			},
 		}),
-	))
+	)
+
+	// Connect tasks
+	fetchTask.ThenRef(forkTask)
+	forkTask.ThenRef(aggregateTask)
+	aggregateTask.ThenRef(completionTask)
+
+	// Create workflow with all tasks
+	wf, err := workflow.New(
+		workflow.WithNamespace("data-processing"),
+		workflow.WithName("parallel-data-fetch"),
+		workflow.WithVersion("1.0.0"),
+		workflow.WithDescription("Process data in parallel branches"),
+		workflow.WithTasks(fetchTask, forkTask, aggregateTask, completionTask),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("Created parallel workflow: %s", wf)
 }

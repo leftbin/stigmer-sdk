@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package examples demonstrates how to create workflows using the Stigmer SDK.
 package main
 

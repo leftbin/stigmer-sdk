@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package examples demonstrates error handling using TRY/CATCH tasks.
 package main
 
@@ -34,21 +36,11 @@ import (
 func main() {
 	defer stigmeragent.Complete()
 
-	wf, err := workflow.New(
-		workflow.WithNamespace("data-processing"),
-		workflow.WithName("error-handling"),
-		workflow.WithVersion("1.0.0"),
-		workflow.WithDescription("Workflow with comprehensive error handling"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Task 1: Initialize using type-safe setters
-	wf.AddTask(workflow.SetTask("initialize",
+	initTask := workflow.SetTask("initialize",
 		workflow.SetInt("retryCount", 0),
 		workflow.SetInt("maxRetries", 3),
-	))
+	)
 
 	// Define tasks first for type-safe references (modern pattern)
 	// This enables refactoring, autocomplete, and compile-time validation
@@ -167,21 +159,27 @@ func main() {
 	//   attemptDataFetch (retry the operation) ← LOOP BACK
 	retryTask.ThenRef(waitBeforeRetryTask)
 	waitBeforeRetryTask.ThenRef(attemptDataFetchTask)
-
-	// Add tasks to workflow in logical order
-	wf.AddTask(attemptDataFetchTask)
-	wf.AddTask(checkRetryTask)
-	wf.AddTask(retryTask)
-	wf.AddTask(waitBeforeRetryTask)
-	wf.AddTask(logErrorTask)
+	initTask.ThenRef(attemptDataFetchTask)
 
 	// Final task: Continue with graceful degradation using type-safe setters
 	// This task runs after all error handling is complete (success or max retries exceeded)
 	// Note: No .Then() or .ThenRef() - the workflow ends here
-	wf.AddTask(workflow.SetTask("gracefulDegradation",
+	gracefulDegradationTask := workflow.SetTask("gracefulDegradation",
 		workflow.SetString("status", "partial_failure"),
 		workflow.SetString("message", "Operation failed but workflow continued"),
-	))
+	)
+
+	// Create workflow with all tasks
+	wf, err := workflow.New(
+		workflow.WithNamespace("data-processing"),
+		workflow.WithName("resilient-api-call"),
+		workflow.WithVersion("1.0.0"),
+		workflow.WithDescription("Workflow with comprehensive error handling"),
+		workflow.WithTasks(initTask, attemptDataFetchTask, checkRetryTask, retryTask, waitBeforeRetryTask, logErrorTask, gracefulDegradationTask),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("Created error handling workflow: %s", wf)
 }

@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package examples demonstrates workflow conditionals using SWITCH tasks.
 package main
 
@@ -33,17 +35,6 @@ import (
 // - Optional version (defaults to "0.1.0" for development)
 func main() {
 	defer stigmeragent.Complete()
-
-	wf, err := workflow.New(
-		workflow.WithNamespace("data-processing"),
-		workflow.WithName("conditional-processing"),
-		// Version is optional - defaults to "0.1.0" for development
-		// workflow.WithVersion("1.0.0"),  // Uncomment for production
-		workflow.WithDescription("Process data with conditional routing"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Task 1: Fetch data from API
 	//
@@ -114,8 +105,18 @@ func main() {
 	//        └─ default        → handleUnexpectedError
 	fetchTask.ThenRef(checkTask) // Type-safe! Refactoring-friendly!
 
-	// Add all tasks to the workflow
-	wf.AddTask(fetchTask).AddTask(checkTask).AddTask(successTask).AddTask(notFoundTask).AddTask(serverErrorTask).AddTask(unexpectedErrorTask)
+	// Create workflow with all tasks
+	wf, err := workflow.New(
+		workflow.WithNamespace("data-processing"),
+		workflow.WithName("conditional-deployment"),
+		// Version is optional - defaults to "0.1.0" for development
+		// workflow.WithVersion("1.0.0"),  // Uncomment for production
+		workflow.WithDescription("Process data with conditional routing"),
+		workflow.WithTasks(fetchTask, checkTask, successTask, notFoundTask, serverErrorTask, unexpectedErrorTask),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("Created conditional workflow: %s", wf)
 }

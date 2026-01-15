@@ -2,7 +2,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 
@@ -10,7 +9,6 @@ import (
 	"github.com/leftbin/stigmer-sdk/go/agent"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // This example demonstrates creating an agent with all three types of MCP servers:

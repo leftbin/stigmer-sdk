@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package main provides a reference example for Task 3 (Synthesis Architecture)
 // showing how to use the Buf-generated manifest proto to convert SDK types to AgentManifest.
 //
