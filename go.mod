@@ -3,7 +3,7 @@ module github.com/leftbin/stigmer-sdk
 go 1.25.0
 
 require (
-	buf.build/gen/go/leftbin/stigmer/protocolbuffers/go v1.36.11-20260115101602-a1175e7199a1.1
+	buf.build/gen/go/leftbin/stigmer/protocolbuffers/go v1.36.11-20260116195247-3f1bb4a83c5d.1
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/protobuf v1.36.11

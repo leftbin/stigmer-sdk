@@ -87,7 +87,7 @@ update-deps: ## Update buf proto dependencies to latest
 	@echo "✓ Dependencies updated successfully!"
 	@echo ""
 	@echo "Updated versions:"
-	@grep "buf.build/gen/go" go.mod
+	@grep "buf.build/gen/go" ../go.mod
 
 .PHONY: release
 release: ## Create and push a release tag (usage: make release TAG=v0.1.3)
