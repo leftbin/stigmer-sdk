@@ -186,9 +186,10 @@ func TestExample07_BasicWorkflow(t *testing.T) {
 			t.Error("Workflow should have tasks")
 		}
 
-		// Should have 2 tasks: fetchData, processResponse (Phase 5.1 Pulumi-aligned pattern)
-		if len(workflow.Spec.Tasks) != 2 {
-			t.Errorf("Expected 2 tasks, got %d", len(workflow.Spec.Tasks))
+		// Should have 3 tasks: context init + fetchData + processResponse
+		// Note: Context initialization is automatically injected as first task
+		if len(workflow.Spec.Tasks) != 3 {
+			t.Errorf("Expected 3 tasks (including context init), got %d", len(workflow.Spec.Tasks))
 		}
 	})
 }
@@ -441,6 +442,99 @@ func TestExample13_WorkflowAndAgentSharedContext(t *testing.T) {
 		// Both workflow and agent should be configured with shared context
 		// This example demonstrates that both can use the same context for configuration
 		// The key point is that both manifests are created successfully from the same context
+	})
+}
+
+// TestContextVariables tests the context variables example with automatic SET task injection
+func TestContextVariables(t *testing.T) {
+	runExampleTest(t, "context-variables/main.go", func(t *testing.T, outputDir string) {
+		manifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+		assertFileExists(t, manifestPath)
+
+		var manifest workflowv1.WorkflowManifest
+		readProtoManifest(t, manifestPath, &manifest)
+
+		if len(manifest.Workflows) != 1 {
+			t.Fatalf("Expected 1 workflow, got %d", len(manifest.Workflows))
+		}
+
+		workflow := manifest.Workflows[0]
+		if workflow.Spec == nil {
+			t.Fatal("Workflow spec is nil")
+		}
+
+		// Should have tasks: context init + user tasks
+		if len(workflow.Spec.Tasks) < 2 {
+			t.Fatalf("Expected at least 2 tasks (init + user tasks), got %d", len(workflow.Spec.Tasks))
+		}
+
+		// First task should be __stigmer_init_context
+		initTask := workflow.Spec.Tasks[0]
+		if initTask.Name != "__stigmer_init_context" {
+			t.Errorf("First task name = %v, want __stigmer_init_context", initTask.Name)
+		}
+
+		// Should be a SET task
+		if initTask.Kind.String() != "WORKFLOW_TASK_KIND_SET" {
+			t.Errorf("Init task kind = %v, want WORKFLOW_TASK_KIND_SET", initTask.Kind)
+		}
+
+		// Verify task config has variables
+		if initTask.TaskConfig == nil {
+			t.Fatal("Init task config is nil")
+		}
+
+		varsField, ok := initTask.TaskConfig.Fields["variables"]
+		if !ok {
+			t.Fatal("Init task should have 'variables' field")
+		}
+
+		varsStruct := varsField.GetStructValue()
+		if varsStruct == nil {
+			t.Fatal("Variables should be a struct")
+		}
+
+		// Verify all expected variables are present
+		expectedVars := []string{"apiURL", "apiVersion", "retries", "timeout", "isProd", "enableDebug", "config"}
+		for _, varName := range expectedVars {
+			if _, ok := varsStruct.Fields[varName]; !ok {
+				t.Errorf("Expected variable %s not found in context init task", varName)
+			}
+		}
+
+		// Verify variable types are correctly serialized
+		// String variables
+		if apiURL := varsStruct.Fields["apiURL"].GetStringValue(); apiURL != "https://api.example.com" {
+			t.Errorf("apiURL = %v, want https://api.example.com", apiURL)
+		}
+
+		// Integer variables (serialized as numbers)
+		if retries := varsStruct.Fields["retries"].GetNumberValue(); retries != 3 {
+			t.Errorf("retries = %v, want 3", retries)
+		}
+
+		// Boolean variables
+		if isProd := varsStruct.Fields["isProd"].GetBoolValue(); isProd != false {
+			t.Errorf("isProd = %v, want false", isProd)
+		}
+
+		// Object variables
+		configStruct := varsStruct.Fields["config"].GetStructValue()
+		if configStruct == nil {
+			t.Fatal("config should be a struct")
+		}
+
+		// Verify nested object structure
+		dbStruct := configStruct.Fields["database"].GetStructValue()
+		if dbStruct == nil {
+			t.Fatal("config.database should be a struct")
+		}
+
+		if dbHost := dbStruct.Fields["host"].GetStringValue(); dbHost != "localhost" {
+			t.Errorf("config.database.host = %v, want localhost", dbHost)
+		}
+
+		t.Log("✅ Context variables successfully injected with correct types!")
 	})
 }
 
