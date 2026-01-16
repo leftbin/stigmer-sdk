@@ -1057,15 +1057,61 @@ func FieldRef(fieldPath string) string {
 	return fmt.Sprintf("${.%s}", fieldPath)
 }
 
-// Interpolate combines static text with variable references.
-// This provides a cleaner way to build strings with variable interpolation.
-// Example: Interpolate(VarRef("apiURL"), "/data") instead of "${apiURL}/data"
+// Interpolate combines static text with variable references into a valid expression.
+// 
+// When mixing expressions (${...}) with static strings, this creates a proper
+// Serverless Workflow DSL expression using concatenation syntax.
+//
+// Examples:
+//   - Interpolate(VarRef("apiURL"), "/data") 
+//     → ${ apiURL + "/data" } ✅
+//   - Interpolate("Bearer ", VarRef("token"))
+//     → ${ "Bearer " + token } ✅
+//   - Interpolate("https://", VarRef("domain"), "/api/v1")
+//     → ${ "https://" + domain + "/api/v1" } ✅
+//
+// Special cases:
+//   - Interpolate(VarRef("url")) → ${url} (single expression, no concatenation)
+//   - Interpolate("https://api.example.com") → https://api.example.com (plain string)
 func Interpolate(parts ...string) string {
-	result := ""
-	for _, part := range parts {
-		result += part
+	if len(parts) == 0 {
+		return ""
 	}
-	return result
+	
+	// Single part - return as-is
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	
+	// Check if any part contains an expression (starts with ${)
+	hasExpression := false
+	for _, part := range parts {
+		if strings.HasPrefix(part, "${") {
+			hasExpression = true
+			break
+		}
+	}
+	
+	// If no expressions, just concatenate as plain string
+	if !hasExpression {
+		return strings.Join(parts, "")
+	}
+	
+	// Build expression with proper concatenation
+	exprParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.HasPrefix(part, "${") && strings.HasSuffix(part, "}") {
+			// Extract expression content (remove ${ and })
+			expr := part[2 : len(part)-1]
+			exprParts = append(exprParts, expr)
+		} else {
+			// Quote static strings
+			exprParts = append(exprParts, fmt.Sprintf("\"%s\"", part))
+		}
+	}
+	
+	// Join with + operator and wrap in ${ }
+	return fmt.Sprintf("${ %s }", strings.Join(exprParts, " + "))
 }
 
 // ============================================================================

@@ -528,33 +528,41 @@ func TestFieldRef(t *testing.T) {
 }
 
 func TestInterpolate(t *testing.T) {
-	// Test basic interpolation
+	// Test basic interpolation with expression
 	result := workflow.Interpolate(workflow.VarRef("apiURL"), "/data")
-	expected := "${apiURL}/data"
+	expected := "${ apiURL + \"/data\" }"
 
 	if result != expected {
 		t.Errorf("Interpolate() = %q, want %q", result, expected)
 	}
 
-	// Test multiple parts
+	// Test multiple parts with expression
 	result = workflow.Interpolate("Bearer ", workflow.VarRef("API_TOKEN"))
-	expected = "Bearer ${API_TOKEN}"
+	expected = "${ \"Bearer \" + API_TOKEN }"
 
 	if result != expected {
 		t.Errorf("Interpolate() with Bearer = %q, want %q", result, expected)
 	}
 
-	// Test complex interpolation
+	// Test complex interpolation with multiple expressions
 	result = workflow.Interpolate(
 		"https://",
 		workflow.VarRef("domain"),
 		"/api/v1/users/",
 		workflow.FieldRef("userId"),
 	)
-	expected = "https://${domain}/api/v1/users/${.userId}"
+	expected = "${ \"https://\" + domain + \"/api/v1/users/\" + .userId }"
 
 	if result != expected {
 		t.Errorf("Interpolate() complex = %q, want %q", result, expected)
+	}
+
+	// Test plain string (no expressions)
+	result = workflow.Interpolate("https://api.example.com/data")
+	expected = "https://api.example.com/data"
+
+	if result != expected {
+		t.Errorf("Interpolate() plain string = %q, want %q", result, expected)
 	}
 }
 
@@ -828,12 +836,13 @@ func TestHighLevelHelpersIntegration(t *testing.T) {
 		t.Fatal("Integration test: config type is not *HttpCallTaskConfig")
 	}
 
-	expectedURI := "${apiURL}/users/${.userId}"
+	// Interpolate now generates proper expression syntax
+	expectedURI := "${ apiURL + \"/users/\" + .userId }"
 	if cfg.URI != expectedURI {
 		t.Errorf("Integration test: URI = %q, want %q", cfg.URI, expectedURI)
 	}
 
-	expectedAuth := "Bearer ${API_TOKEN}"
+	expectedAuth := "${ \"Bearer \" + API_TOKEN }"
 	if cfg.Headers["Authorization"] != expectedAuth {
 		t.Errorf("Integration test: Authorization = %q, want %q", cfg.Headers["Authorization"], expectedAuth)
 	}
