@@ -17,6 +17,67 @@ This log captures all learnings, discoveries, and solutions from implementing an
 
 ---
 
+## API Design & Simplification
+
+**Topic Coverage**: API naming conventions, constructor patterns, Pulumi alignment, developer experience
+
+### 2026-01-17 - Single Pattern API Cleanup (BREAKING CHANGE)
+
+**Problem**: SDK had two ways to create agents/workflows causing confusion:
+- `agent.New()` (standalone, used global registry)
+- `agent.NewWithContext(ctx, ...)` (context-aware, recommended)
+
+Developers didn't know which to use. The "WithContext" suffix was verbose and un-Pulumi-like.
+
+**Root Cause**:
+- Historical evolution: Started with standalone `New()`, added context support later
+- Kept both for backward compatibility
+- "WithContext" suffix made API feel second-class
+- Pulumi uses `New(ctx, ...)` not `NewWithContext(ctx, ...)`
+
+**Solution**: Removed all legacy patterns, kept only clean context-first API
+
+**Changes Made:**
+1. **Deleted legacy synthesis code:**
+   - `stigmer.Complete()` function
+   - `internal/registry/` package (global registry)
+   - `internal/synth/synth.go` (auto-synthesis)
+   - All tests using old patterns
+
+2. **Removed standalone constructors:**
+   - Deleted `agent.New()` without context
+   - Deleted `workflow.New()` without context
+
+3. **Simplified naming (removed "WithContext" suffix):**
+   - `agent.NewWithContext(ctx, ...)` → `agent.New(ctx, ...)`
+   - `workflow.NewWithContext(ctx, ...)` → `workflow.New(ctx, ...)`
+
+4. **Updated all examples (13 total):**
+   - All use `stigmer.Run()` pattern
+   - All use `agent.New(ctx, ...)` and `workflow.New(ctx, ...)`
+   - Removed legacy workflow example
+
+**Result:**
+```go
+// Clean, Pulumi-aligned API
+stigmer.Run(func(ctx *stigmer.Context) error {
+    agent.New(ctx, ...)      // Like s3.NewBucket(ctx, ...)
+    workflow.New(ctx, ...)   // Consistent pattern
+    return nil
+})
+```
+
+**Benefits:**
+- ✅ Single way to do things (no confusion)
+- ✅ Pulumi-familiar naming (context-first, no suffix)
+- ✅ Old code won't compile (breaking change forces migration)
+- ✅ Cleaner API surface (~1000+ lines removed)
+- ✅ Better developer experience
+
+**Key Learning**: When adding context support to existing API, **replace** the old API entirely rather than adding a "WithContext" variant. The suffix makes the new API feel like an afterthought. Pulumi's pattern (`New(ctx, ...)`) is the gold standard.
+
+---
+
 ## Typed Context System (NEW MAJOR FEATURE)
 
 **Topic Coverage**: Pulumi-style context management, typed references, compile-time safety, IDE support, shared context between workflows and agents
@@ -46,7 +107,7 @@ stigmer.Run(func(ctx *stigmer.Context) error {
     retries := ctx.SetInt("retries", 3)
     
     // Use in workflow - compile-time checked!
-    wf, _ := workflow.NewWithContext(ctx,
+    wf, _ := workflow.New(ctx,
         workflow.WithTasks(
             workflow.HttpCallTask("fetch",
                 workflow.WithURI(apiURL.Concat("/data")),  // Type-safe!
@@ -56,7 +117,7 @@ stigmer.Run(func(ctx *stigmer.Context) error {
     )
     
     // Use in agent - same context!
-    ag, _ := agent.NewWithContext(ctx,
+    ag, _ := agent.New(ctx,
         agent.WithOrg(orgName),  // Shared typed reference
     )
     
@@ -221,7 +282,7 @@ wf, _ := workflow.New(
 stigmer.Run(func(ctx *stigmer.Context) error {
     apiURL := ctx.SetString("apiURL", "https://api.example.com")
     
-    wf, _ := workflow.NewWithContext(ctx,
+    wf, _ := workflow.New(ctx,
         workflow.WithName("my-workflow"),
         workflow.WithTasks(
             workflow.HttpCallTask("fetch",
@@ -236,7 +297,7 @@ stigmer.Run(func(ctx *stigmer.Context) error {
 
 **Phase 2 - Deprecation** (future):
 - Mark old `workflow.New()` as deprecated
-- Recommend `workflow.NewWithContext()` in docs
+- Recommend `workflow.New()` in docs
 - Provide migration guide
 
 **Phase 3 - Breaking Change** (far future):
@@ -331,7 +392,7 @@ stigmer.Run(func(ctx1 *stigmer.Context) error {
     
     stigmer.Run(func(ctx2 *stigmer.Context) error {
         // Can't use apiURL from ctx1 here
-        workflow.NewWithContext(ctx2, ...)  // Won't have apiURL
+        workflow.New(ctx2, ...)  // Won't have apiURL
         return nil
     })
     
@@ -345,8 +406,8 @@ stigmer.Run(func(ctx1 *stigmer.Context) error {
 stigmer.Run(func(ctx *stigmer.Context) error {
     apiURL := ctx.SetString("apiURL", "...")
     
-    wf, _ := workflow.NewWithContext(ctx, ...)  // Has apiURL
-    ag, _ := agent.NewWithContext(ctx, ...)     // Has apiURL
+    wf, _ := workflow.New(ctx, ...)  // Has apiURL
+    ag, _ := agent.New(ctx, ...)     // Has apiURL
     
     return nil
 })
@@ -4055,7 +4116,7 @@ flowchart TB
 //	    apiBase := ctx.SetString("apiBase", "https://api.example.com")
 //	    
 //	    // Create workflow
-//	    wf, _ := workflow.NewWithContext(ctx, ...)
+//	    wf, _ := workflow.New(ctx, ...)
 //	    
 //	    // Tasks with implicit dependencies
 //	    fetchTask := wf.HttpGet("fetch", endpoint)

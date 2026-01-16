@@ -45,43 +45,53 @@ import (
 )
 
 func main() {
-    // Enable auto-synthesis (writes manifest.pb on exit)
-    defer stigmer.Complete()
+    err := stigmer.Run(func(ctx *stigmer.Context) error {
+        // Create inline skill from markdown file
+        securitySkill, err := skill.New(
+            skill.WithName("security-guidelines"),
+            skill.WithDescription("Security review guidelines"),
+            skill.WithMarkdownFromFile("skills/security.md"),
+        )
+        if err != nil {
+            return err
+        }
+
+        // Create MCP server
+        githubMCP, err := mcpserver.Stdio(
+            mcpserver.WithName("github"),
+            mcpserver.WithCommand("npx"),
+            mcpserver.WithArgs("-y", "@modelcontextprotocol/server-github"),
+            mcpserver.WithEnvPlaceholder("GITHUB_TOKEN", "${GITHUB_TOKEN}"),
+        )
+        if err != nil {
+            return err
+        }
+
+        // Create agent with instructions from file
+        myAgent, err := agent.New(ctx,
+            agent.WithName("code-reviewer"),
+            agent.WithInstructionsFromFile("instructions/reviewer.md"),
+            agent.WithDescription("AI code reviewer with security expertise"),
+            agent.WithIconURL("https://example.com/icon.png"),
+        )
+        if err != nil {
+            return err
+        }
+        
+        // Use builder methods to add components
+        myAgent.
+            AddSkill(*securitySkill).                    // Inline skill
+            AddSkill(skill.Platform("coding-standards")). // Platform skill
+            AddMCPServer(githubMCP)
+        
+        fmt.Printf("Agent created: %s\n", myAgent.Name)
+        
+        return nil
+    })
     
-    // Create inline skill from markdown file
-    securitySkill, _ := skill.New(
-        skill.WithName("security-guidelines"),
-        skill.WithDescription("Security review guidelines"),
-        skill.WithMarkdownFromFile("skills/security.md"),
-    )
-
-    // Create MCP server
-    githubMCP, _ := mcpserver.Stdio(
-        mcpserver.WithName("github"),
-        mcpserver.WithCommand("npx"),
-        mcpserver.WithArgs("-y", "@modelcontextprotocol/server-github"),
-        mcpserver.WithEnvPlaceholder("GITHUB_TOKEN", "${GITHUB_TOKEN}"),
-    )
-
-    // Create agent with instructions from file
-    myAgent, err := agent.New(
-        agent.WithName("code-reviewer"),
-        agent.WithInstructionsFromFile("instructions/reviewer.md"),
-        agent.WithDescription("AI code reviewer with security expertise"),
-        agent.WithIconURL("https://example.com/icon.png"),
-    )
     if err != nil {
         log.Fatal(err)
     }
-    
-    // Use builder methods to add components
-    myAgent.
-        AddSkill(*securitySkill).                    // Inline skill
-        AddSkill(skill.Platform("coding-standards")). // Platform skill
-        AddMCPServer(githubMCP)
-    
-    fmt.Printf("Agent created: %s\n", myAgent.Name)
-    // On exit, defer stigmer.Complete() automatically writes manifest.pb
 }
 ```
 
@@ -299,7 +309,7 @@ func main() {
         orgName := ctx.SetString("org", "my-org")
         
         // Create workflow with context
-        wf, err := workflow.NewWithContext(ctx,
+        wf, err := workflow.New(ctx,
             workflow.WithNamespace("data-processing"),
             workflow.WithName("basic-data-fetch"),
             workflow.WithVersion("1.0.0"),

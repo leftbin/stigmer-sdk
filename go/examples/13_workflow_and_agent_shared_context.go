@@ -41,7 +41,7 @@ func main() {
 		}
 
 		// Create a workflow that uses the shared context
-		wf, err := workflow.NewWithContext(ctx,
+		wf, err := workflow.New(ctx,
 			workflow.WithNamespace("data-processing"),
 			workflow.WithName("fetch-and-analyze"),
 			workflow.WithVersion("1.0.0"),
@@ -72,7 +72,7 @@ func main() {
 		wf.AddTasks(fetchTask, processTask)
 
 		// Create an agent that uses the SAME shared context
-		ag, err := agent.NewWithContext(ctx,
+		ag, err := agent.New(ctx,
 			agent.WithName("data-analyzer"),
 			agent.WithInstructions("Analyze data from the API and provide insights"),
 			agent.WithDescription("AI data analyst"),

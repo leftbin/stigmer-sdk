@@ -14,7 +14,7 @@
 //	    iconBase := ctx.SetString("iconBase", "https://cdn.example.com")
 //	    
 //	    // Create agent
-//	    ag, err := agent.NewWithContext(ctx,
+//	    ag, err := agent.New(ctx,
 //	        agent.WithName("code-reviewer"),
 //	        agent.WithInstructions("Review code and suggest improvements"),
 //	        agent.WithOrg(orgName),
@@ -38,7 +38,7 @@
 //	    orgName := ctx.SetString("org", "my-org")
 //	    
 //	    // Create workflow
-//	    wf, _ := workflow.NewWithContext(ctx,
+//	    wf, _ := workflow.New(ctx,
 //	        workflow.WithName("data-fetch"),
 //	        workflow.WithOrg(orgName),
 //	    )

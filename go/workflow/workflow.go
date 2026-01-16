@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/leftbin/stigmer-sdk/go/environment"
-	"github.com/leftbin/stigmer-sdk/go/internal/registry"
 )
 
 // Context is a minimal interface that represents a stigmer context.
@@ -22,21 +21,14 @@ type Context interface {
 // or in parallel. They support various task types including HTTP calls, gRPC calls,
 // conditional logic, loops, error handling, and more.
 //
-// Use New() with functional options to create a workflow:
-//
-//	workflow, err := workflow.New(
-//	    workflow.WithNamespace("my-org"),
-//	    workflow.WithName("data-pipeline"),
-//	    workflow.WithVersion("1.0.0"),
-//	    workflow.WithDescription("Process data from external API"),
-//	)
-//
-// Or use with typed context (recommended):
+// Use workflow.New() with stigmer.Run() to create a workflow:
 //
 //	stigmer.Run(func(ctx *stigmer.Context) error {
 //	    wf, err := workflow.New(ctx,
 //	        workflow.WithNamespace("my-org"),
 //	        workflow.WithName("data-pipeline"),
+//	        workflow.WithVersion("1.0.0"),
+//	        workflow.WithDescription("Process data from external API"),
 //	    )
 //	    return err
 //	})
@@ -63,69 +55,9 @@ type Workflow struct {
 // Option is a functional option for configuring a Workflow.
 type Option func(*Workflow) error
 
-// New creates a new Workflow with the given options.
-//
-// The workflow is automatically registered in the global registry for synthesis.
-// When the program exits and defer stigmer.Complete() is called, this workflow
-// will be converted to a manifest proto and written to disk.
-//
-// Required options:
-//   - WithNamespace: workflow namespace
-//   - WithName: workflow name
-//
-// Optional (with defaults):
-//   - WithVersion: workflow version (defaults to "0.1.0" if not provided)
-//   - WithDescription: human-readable description
-//   - WithOrg: organization identifier
-//
-// Example:
-//
-//	workflow, err := workflow.New(
-//	    workflow.WithNamespace("data-processing"),
-//	    workflow.WithName("daily-sync"),
-//	    workflow.WithVersion("1.0.0"),  // Optional
-//	    workflow.WithDescription("Sync data from external API daily"),
-//	)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-// For workflows using typed context, use NewWithContext() instead.
-func New(opts ...Option) (*Workflow, error) {
-	w := &Workflow{
-		Document: Document{
-			DSL: "1.0.0", // Default DSL version
-		},
-		Tasks:                []*Task{},
-		EnvironmentVariables: []environment.Variable{},
-	}
 
-	// Apply all options
-	for _, opt := range opts {
-		if err := opt(w); err != nil {
-			return nil, err
-		}
-	}
-
-	// Auto-generate version if not provided
-	if w.Document.Version == "" {
-		w.Document.Version = "0.1.0" // Default version for development
-	}
-
-	// Validate the workflow
-	if err := validate(w); err != nil {
-		return nil, err
-	}
-
-	// Register in global registry for synthesis
-	registry.Global().RegisterWorkflow(w)
-
-	return w, nil
-}
-
-// NewWithContext creates a new Workflow with a typed context for variable management.
+// New creates a new Workflow with a typed context for variable management.
 //
-// This is the recommended way to create workflows when using typed context variables.
 // The workflow is automatically registered with the provided context for synthesis.
 //
 // Required options:
@@ -140,14 +72,14 @@ func New(opts ...Option) (*Workflow, error) {
 // Example:
 //
 //	stigmer.Run(func(ctx *stigmer.Context) error {
-//	    wf, err := workflow.NewWithContext(ctx,
+//	    wf, err := workflow.New(ctx,
 //	        workflow.WithNamespace("data-processing"),
 //	        workflow.WithName("daily-sync"),
 //	        workflow.WithVersion("1.0.0"),
 //	    )
 //	    return err
 //	})
-func NewWithContext(ctx Context, opts ...Option) (*Workflow, error) {
+func New(ctx Context, opts ...Option) (*Workflow, error) {
 	w := &Workflow{
 		Document: Document{
 			DSL: "1.0.0", // Default DSL version

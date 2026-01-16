@@ -1,9 +1,9 @@
 //go:build ignore
-// Example 06: Agent with Instructions from Files + Synthesis
+// Example 06: Agent with Instructions from Files
 //
 // This example demonstrates:
 // 1. Loading agent instructions and skill content from external files
-// 2. Auto-synthesis pattern using defer stigmer.Complete()
+// 2. Automatic synthesis using stigmer.Run()
 //
 // Benefits of loading from files:
 // 1. Better organization - keep large instructions separate from code
@@ -11,11 +11,6 @@
 // 3. Version control - track instruction changes independently
 // 4. Reusability - share instruction files across multiple agents
 // 5. Maintainability - easier to review and update long instructions
-//
-// Synthesis Model:
-// - SDK collects agent configuration in memory
-// - On program exit, defer stigmer.Complete() writes manifest.pb
-// - CLI reads manifest.pb and deploys to platform
 //
 // Directory structure:
 //
@@ -26,65 +21,75 @@
 //	    ├── security-guidelines.md    (skill content)
 //	    └── testing-best-practices.md (skill content)
 //
-// Run modes:
-// - Dry-run: go run examples/06_agent_with_instructions_from_files.go
-// - Synthesis: STIGMER_OUT_DIR=/tmp go run examples/06_agent_with_instructions_from_files.go
-//
 package main
 
 import (
 	"fmt"
 	"log"
 
-	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/agent"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/subagent"
 )
 
 func main() {
-	// IMPORTANT: Complete() enables synthesis and runs on exit
-	// This is the synthesis model where manifest.pb is automatically written
-	// - If STIGMER_OUT_DIR is not set: Dry-run mode (prints success message)
-	// - If STIGMER_OUT_DIR is set: Synthesis mode (writes manifest.pb to that directory)
-	defer stigmer.Complete()
+	err := stigmer.Run(func(ctx *stigmer.Context) error {
+		fmt.Println("=== Example 06: Agent with Instructions from Files ===\n")
 
-	fmt.Println("=== Example 06: Agent with Instructions from Files + Synthesis ===\n")
+		// Example 1: Basic agent with instructions from file
+		basicAgent, err := createBasicAgentFromFile(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("1. Basic Agent with Instructions from File", basicAgent)
 
-	// Example 1: Basic agent with instructions from file
-	basicAgent := createBasicAgentFromFile()
-	printAgent("1. Basic Agent with Instructions from File", basicAgent)
+		// Example 2: Agent with inline skills loading markdown from files
+		agentWithFileSkills, err := createAgentWithFileSkills(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("2. Agent with Skills Loaded from Files", agentWithFileSkills)
 
-	// Example 2: Agent with inline skills loading markdown from files
-	agentWithFileSkills := createAgentWithFileSkills()
-	printAgent("2. Agent with Skills Loaded from Files", agentWithFileSkills)
+		// Example 3: Complex agent with everything from files
+		complexAgent, err := createComplexAgentFromFiles(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("3. Complex Agent with All Content from Files", complexAgent)
 
-	// Example 3: Complex agent with everything from files
-	complexAgent := createComplexAgentFromFiles()
-	printAgent("3. Complex Agent with All Content from Files", complexAgent)
+		// Example 4: Sub-agent with instructions from file
+		agentWithFileSubAgent, err := createAgentWithFileSubAgent(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("4. Agent with Sub-Agent Instructions from File", agentWithFileSubAgent)
 
-	// Example 4: Sub-agent with instructions from file
-	agentWithFileSubAgent := createAgentWithFileSubAgent()
-	printAgent("4. Agent with Sub-Agent Instructions from File", agentWithFileSubAgent)
+		return nil
+	})
+
+	if err != nil {
+		log.Fatalf("Failed to run example: %v", err)
+	}
 }
 
 // Example 1: Basic agent with instructions from file
-func createBasicAgentFromFile() *agent.Agent {
-	ag, err := agent.New(
+func createBasicAgentFromFile(ctx *stigmer.Context) (*agent.Agent, error) {
+	ag, err := agent.New(ctx,
 		agent.WithName("code-reviewer"),
 		// Load instructions from external file instead of inline string
 		agent.WithInstructionsFromFile("instructions/code-reviewer.md"),
 		agent.WithDescription("AI code reviewer with comprehensive guidelines"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Example 2: Agent with inline skills loading markdown from files
-func createAgentWithFileSkills() *agent.Agent {
+func createAgentWithFileSkills(ctx *stigmer.Context) (*agent.Agent, error) {
 	// Create inline skills with content loaded from files
 	securitySkill, err := skill.New(
 		skill.WithName("security-guidelines"),
@@ -93,7 +98,7 @@ func createAgentWithFileSkills() *agent.Agent {
 		skill.WithMarkdownFromFile("instructions/security-guidelines.md"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create security skill: %v", err)
+		return nil, fmt.Errorf("failed to create security skill: %w", err)
 	}
 
 	testingSkill, err := skill.New(
@@ -103,23 +108,23 @@ func createAgentWithFileSkills() *agent.Agent {
 		skill.WithMarkdownFromFile("instructions/testing-best-practices.md"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create testing skill: %v", err)
+		return nil, fmt.Errorf("failed to create testing skill: %w", err)
 	}
 
-	ag, err := agent.New(
+	ag, err := agent.New(ctx,
 		agent.WithName("senior-reviewer"),
 		agent.WithInstructionsFromFile("instructions/code-reviewer.md"),
 		agent.WithDescription("Senior code reviewer with security and testing expertise"),
 		agent.WithSkills(*securitySkill, *testingSkill),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Example 3: Complex agent with everything from files
-func createComplexAgentFromFiles() *agent.Agent {
+func createComplexAgentFromFiles(ctx *stigmer.Context) (*agent.Agent, error) {
 	// Create MCP server
 	github, err := mcpserver.Stdio(
 		mcpserver.WithName("github"),
@@ -128,7 +133,7 @@ func createComplexAgentFromFiles() *agent.Agent {
 		mcpserver.WithEnvPlaceholder("GITHUB_TOKEN", "${GITHUB_TOKEN}"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create GitHub MCP server: %v", err)
+		return nil, fmt.Errorf("failed to create GitHub MCP server: %w", err)
 	}
 
 	// Create skills from files
@@ -138,7 +143,7 @@ func createComplexAgentFromFiles() *agent.Agent {
 		skill.WithMarkdownFromFile("instructions/security-guidelines.md"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create security skill: %v", err)
+		return nil, fmt.Errorf("failed to create security skill: %w", err)
 	}
 
 	testingSkill, err := skill.New(
@@ -147,11 +152,11 @@ func createComplexAgentFromFiles() *agent.Agent {
 		skill.WithMarkdownFromFile("instructions/testing-best-practices.md"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create testing skill: %v", err)
+		return nil, fmt.Errorf("failed to create testing skill: %w", err)
 	}
 
 	// Create agent with everything from files
-	ag, err := agent.New(
+	ag, err := agent.New(ctx,
 		agent.WithName("github-reviewer"),
 		agent.WithInstructionsFromFile("instructions/code-reviewer.md"),
 		agent.WithDescription("GitHub PR reviewer with comprehensive guidelines"),
@@ -161,13 +166,13 @@ func createComplexAgentFromFiles() *agent.Agent {
 		agent.WithSkill(skill.Platform("coding-best-practices")),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Example 4: Sub-agent with instructions from file
-func createAgentWithFileSubAgent() *agent.Agent {
+func createAgentWithFileSubAgent(ctx *stigmer.Context) (*agent.Agent, error) {
 	// Create sub-agent with instructions loaded from file
 	securitySpecialist, err := subagent.Inline(
 		subagent.WithName("security-specialist"),
@@ -175,19 +180,19 @@ func createAgentWithFileSubAgent() *agent.Agent {
 		subagent.WithDescription("Security-focused code analyzer"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create security specialist: %v", err)
+		return nil, fmt.Errorf("failed to create security specialist: %w", err)
 	}
 
-	ag, err := agent.New(
+	ag, err := agent.New(ctx,
 		agent.WithName("orchestrator"),
 		agent.WithInstructionsFromFile("instructions/code-reviewer.md"),
 		agent.WithDescription("Main orchestrator with specialized sub-agents"),
 		agent.WithSubAgent(securitySpecialist),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Helper function to print agent information
@@ -211,7 +216,4 @@ func printAgent(title string, ag *agent.Agent) {
 	}
 
 	fmt.Println("\n✅ Files loaded successfully!")
-	fmt.Println("\nℹ️  Synthesis Mode:")
-	fmt.Println("   - Dry-run: No STIGMER_OUT_DIR set (current)")
-	fmt.Println("   - Synthesis: Set STIGMER_OUT_DIR=/tmp to write manifest.pb")
 }

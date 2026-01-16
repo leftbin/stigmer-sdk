@@ -83,7 +83,7 @@ apiBase := ctx.SetString("apiBase", "https://api.example.com")
 orgName := ctx.SetString("org", "my-org")
 
 // Use directly in workflow metadata
-wf, _ := workflow.NewWithContext(ctx,
+wf, _ := workflow.New(ctx,
     workflow.WithOrg(orgName), // Config reference
 )
 ```
@@ -228,7 +228,7 @@ apiBase := ctx.SetString("apiBase", "https://api.example.com")
 orgName := ctx.SetString("org", "my-org")
 
 // Use config in workflow metadata or task inputs
-wf, _ := workflow.NewWithContext(ctx,
+wf, _ := workflow.New(ctx,
     workflow.WithOrg(orgName),
 )
 ```
@@ -362,7 +362,7 @@ func main() {
         fetchTask.ThenRef(processTask)
         
         // Create workflow with all tasks
-        wf, err := workflow.NewWithContext(ctx,
+        wf, err := workflow.New(ctx,
             workflow.WithNamespace("data-processing"),
             workflow.WithName("basic-data-fetch"),
             workflow.WithOrg("my-org"),
@@ -400,7 +400,7 @@ func main() {
         orgName := ctx.SetString("org", "my-org")
         
         // Create workflow with context config
-        wf, err := workflow.NewWithContext(ctx,
+        wf, err := workflow.New(ctx,
             workflow.WithNamespace("data-processing"),
             workflow.WithName("basic-data-fetch"),
             workflow.WithVersion("1.0.0"),

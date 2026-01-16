@@ -10,28 +10,29 @@
 //	import "github.com/leftbin/stigmer-sdk/go/agent"
 //	
 //	func main() {
-//	    defer stigmer.Complete()  // Required: enables synthesis
-//	
-//	    agent.New(
-//	        agent.WithName("code-reviewer"),
-//	        agent.WithInstructions("Review code and suggest improvements"),
-//	        agent.WithDescription("AI code reviewer"),
-//	    )
+//	    err := stigmer.Run(func(ctx *stigmer.Context) error {
+//	        ag, err := agent.New(ctx,
+//	            agent.WithName("code-reviewer"),
+//	            agent.WithInstructions("Review code and suggest improvements"),
+//	            agent.WithDescription("AI code reviewer"),
+//	        )
+//	        return err
+//	    })
+//	    if err != nil {
+//	        log.Fatal(err)
+//	    }
 //	}
 //
 // # Synthesis Model
 //
-// The SDK uses a "synthesis model" where agent definitions are automatically
-// converted to protobuf manifests when the program exits:
+// The SDK uses stigmer.Run() for automatic manifest synthesis:
 //
-//  1. Define agents using agent.New() - they auto-register in a global registry
-//  2. Call defer stigmer.Complete() at the start of main() - runs synthesis on exit
-//  3. The CLI sets STIGMER_OUT_DIR and runs your program
-//  4. On exit, Complete() writes manifest.pb to the output directory
-//  5. The CLI reads manifest.pb and deploys to the platform
+//  1. Define agents using agent.New() inside stigmer.Run()
+//  2. Agents are automatically registered in the context
+//  3. When stigmer.Run() completes, manifests are automatically synthesized
+//  4. The CLI reads manifest.pb and deploys to the platform
 //
-// This approach minimizes boilerplate while maintaining Go's explicit style.
-// See docs/architecture/synthesis-model.md for why this pattern is required.
+// This approach provides clean API ergonomics while maintaining Go's explicit style.
 //
 // # Validation
 //
@@ -42,7 +43,7 @@
 //   - Description: max 500 characters (optional)
 //   - IconURL: valid URL format (optional)
 //
-// Validation errors are returned from New() and provide detailed context.
+// Validation errors are returned from NewWithContext() and provide detailed context.
 //
 // # Proto Conversion
 //

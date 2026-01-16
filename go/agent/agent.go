@@ -4,7 +4,6 @@ import (
 	"os"
 
 	"github.com/leftbin/stigmer-sdk/go/environment"
-	"github.com/leftbin/stigmer-sdk/go/internal/registry"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
 	"github.com/leftbin/stigmer-sdk/go/subagent"
@@ -24,18 +23,10 @@ type Context interface {
 // The Agent is the "template" layer - it defines the immutable logic and requirements
 // for an agent. Actual configuration with secrets happens at the AgentInstance level.
 //
-// Use New() with functional options to create an Agent:
-//
-//	agent, err := agent.New(
-//	    agent.WithName("code-reviewer"),
-//	    agent.WithInstructions("Review code and suggest improvements"),
-//	    agent.WithDescription("AI code reviewer"),
-//	)
-//
-// Or use with typed context (recommended):
+// Use agent.New() with stigmer.Run() to create an Agent:
 //
 //	stigmer.Run(func(ctx *stigmer.Context) error {
-//	    ag, err := agent.NewWithContext(ctx,
+//	    ag, err := agent.New(ctx,
 //	        agent.WithName("code-reviewer"),
 //	        agent.WithInstructions("Review code and suggest improvements"),
 //	    )
@@ -76,54 +67,9 @@ type Agent struct {
 // Option is a functional option for configuring an Agent.
 type Option func(*Agent) error
 
-// New creates a new Agent with the given options.
-//
-// The agent is automatically registered in the global registry for synthesis.
-// When the program exits and defer synth.AutoSynth() is called, this agent
-// will be converted to a manifest proto and written to disk.
-//
-// Required options:
-//   - WithName: agent name
-//   - WithInstructions: behavior instructions
-//
-// Example:
-//
-//	agent, err := agent.New(
-//	    agent.WithName("code-reviewer"),
-//	    agent.WithInstructions("Review code and suggest improvements"),
-//	    agent.WithDescription("AI code reviewer"),
-//	)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-// For agents using typed context, use NewWithContext() instead.
-func New(opts ...Option) (*Agent, error) {
-	a := &Agent{}
 
-	// Apply all options
-	for _, opt := range opts {
-		if err := opt(a); err != nil {
-			return nil, err
-		}
-	}
-
-	// Validate the agent
-	if err := validate(a); err != nil {
-		return nil, err
-	}
-
-	// Register in global registry for synthesis
-	// This enables the "synthesis model" where the SDK automatically
-	// writes manifest.pb when the program exits (via defer synth.AutoSynth())
-	registry.Global().RegisterAgent(a)
-
-	return a, nil
-}
-
-// NewWithContext creates a new Agent with a typed context for variable management.
+// New creates a new Agent with a typed context for variable management.
 //
-// This is the recommended way to create agents when using typed context variables.
 // The agent is automatically registered with the provided context for synthesis.
 //
 // Required options:
@@ -133,13 +79,13 @@ func New(opts ...Option) (*Agent, error) {
 // Example:
 //
 //	stigmer.Run(func(ctx *stigmer.Context) error {
-//	    ag, err := agent.NewWithContext(ctx,
+//	    ag, err := agent.New(ctx,
 //	        agent.WithName("code-reviewer"),
 //	        agent.WithInstructions("Review code and suggest improvements"),
 //	    )
 //	    return err
 //	})
-func NewWithContext(ctx Context, opts ...Option) (*Agent, error) {
+func New(ctx Context, opts ...Option) (*Agent, error) {
 	a := &Agent{
 		ctx: ctx,
 	}

@@ -2,10 +2,14 @@ package stigmer
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/leftbin/stigmer-sdk/go/agent"
-	"github.com/leftbin/stigmer-sdk/go/internal/registry"
+	"github.com/leftbin/stigmer-sdk/go/internal/synth"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -276,21 +280,104 @@ func (c *Context) Synthesize() error {
 		return fmt.Errorf("context already synthesized")
 	}
 
-	// Register all workflows and agents with the global registry
-	// so that the synthesis system can find them
-	reg := registry.Global()
-	for _, wf := range c.workflows {
-		reg.RegisterWorkflow(wf)
-	}
-	for _, ag := range c.agents {
-		reg.RegisterAgent(ag)
+	// Get output directory from environment variable
+	// If not set, we're in dry-run mode (just validate, don't write files)
+	outputDir := os.Getenv("STIGMER_OUT_DIR")
+	if outputDir == "" {
+		// Dry-run mode: just mark as synthesized
+		c.synthesized = true
+		return nil
 	}
 
-	// Trigger synthesis via the internal synth package
-	// This handles the actual conversion to proto and writing to disk
-	Complete()
+	// Import synthesis package for converters
+	// We'll call the converters to generate manifests
+	if err := c.synthesizeManifests(outputDir); err != nil {
+		return fmt.Errorf("synthesis failed: %w", err)
+	}
 
 	c.synthesized = true
+	return nil
+}
+
+// synthesizeManifests writes agent and workflow manifests to disk
+func (c *Context) synthesizeManifests(outputDir string) error {
+	// Ensure output directory exists
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Convert agents to interfaces for the converter
+	var agentInterfaces []interface{}
+	for _, ag := range c.agents {
+		agentInterfaces = append(agentInterfaces, ag)
+	}
+
+	// Convert workflows to interfaces for the converter
+	var workflowInterfaces []interface{}
+	for _, wf := range c.workflows {
+		workflowInterfaces = append(workflowInterfaces, wf)
+	}
+
+	// Synthesize agents if any exist
+	if len(agentInterfaces) > 0 {
+		if err := c.synthesizeAgents(outputDir, agentInterfaces); err != nil {
+			return err
+		}
+	}
+
+	// Synthesize workflows if any exist
+	if len(workflowInterfaces) > 0 {
+		if err := c.synthesizeWorkflows(outputDir, workflowInterfaces); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// synthesizeAgents converts agents to protobuf and writes to disk
+func (c *Context) synthesizeAgents(outputDir string, agentInterfaces []interface{}) error {
+	// Convert agents to manifest proto
+	manifest, err := synth.ToManifest(agentInterfaces...)
+	if err != nil {
+		return fmt.Errorf("failed to convert agents to manifest: %w", err)
+	}
+
+	// Serialize to binary protobuf
+	data, err := proto.Marshal(manifest)
+	if err != nil {
+		return fmt.Errorf("failed to serialize agent manifest: %w", err)
+	}
+
+	// Write to agent-manifest.pb
+	manifestPath := filepath.Join(outputDir, "agent-manifest.pb")
+	if err := os.WriteFile(manifestPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write agent manifest: %w", err)
+	}
+
+	return nil
+}
+
+// synthesizeWorkflows converts workflows to protobuf and writes to disk
+func (c *Context) synthesizeWorkflows(outputDir string, workflowInterfaces []interface{}) error {
+	// Convert workflows to manifest proto
+	manifest, err := synth.ToWorkflowManifest(workflowInterfaces...)
+	if err != nil {
+		return fmt.Errorf("failed to convert workflows to manifest: %w", err)
+	}
+
+	// Serialize to binary protobuf
+	data, err := proto.Marshal(manifest)
+	if err != nil {
+		return fmt.Errorf("failed to serialize workflow manifest: %w", err)
+	}
+
+	// Write to workflow-manifest.pb
+	manifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+	if err := os.WriteFile(manifestPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write workflow manifest: %w", err)
+	}
+
 	return nil
 }
 

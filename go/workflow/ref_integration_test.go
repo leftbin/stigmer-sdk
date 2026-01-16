@@ -20,7 +20,7 @@ func (m *MockContext) RegisterWorkflow(wf *workflow.Workflow) {
 func TestWorkflow_NewWithContext(t *testing.T) {
 	ctx := stigmer.NewContext()
 	
-	wf, err := workflow.NewWithContext(ctx,
+	wf, err := workflow.New(ctx,
 		workflow.WithNamespace("test"),
 		workflow.WithName("test-workflow"),
 		workflow.WithVersion("1.0.0"),
