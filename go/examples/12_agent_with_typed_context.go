@@ -60,7 +60,7 @@ func main() {
 
 		// Create the agent with typed context
 		// Note: We're using the typed references directly!
-		ag, err := agent.NewWithContext(ctx,
+		ag, err := agent.New(ctx,
 			// Required fields with typed context
 			agent.WithName(agentName), // Use typed reference - compile-time checked!
 			agent.WithInstructions("Review code and suggest improvements based on best practices, security considerations, and coding standards"),

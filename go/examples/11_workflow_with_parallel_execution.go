@@ -1,20 +1,9 @@
 //go:build ignore
 
-// ⚠️  WARNING: This example uses the OLD API
+// Example 11: Workflow with Parallel Execution
 //
-// This example has not been migrated to the new Pulumi-aligned API yet.
-// It demonstrates parallel execution concepts but uses deprecated patterns.
-//
-// For migration guidance, see: docs/guides/typed-context-migration.md
-// For new API patterns, see: examples/07_basic_workflow.go
-//
-// OLD patterns used in this file:
-// - defer stigmer.Complete() → should use stigmer.Run(func(ctx) {...})
-// - HttpCallTask() with WithHTTPGet() → should use wf.HttpGet(name, uri)
-// - FieldRef() → should use task.Field(fieldName)
-// - .ThenRef(task) → should use implicit dependencies via field references
-//
-// Package examples demonstrates parallel execution using FORK tasks.
+// This example demonstrates parallel execution using FORK tasks.
+// Uses the new stigmer.Run() API with typed context.
 package main
 
 import (
@@ -24,156 +13,74 @@ import (
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
-// This example demonstrates parallel task execution using FORK tasks with modern API patterns.
-//
-// The workflow:
-// 1. Fetches data that needs parallel processing
-// 2. Forks into 4 parallel branches (analytics, validation, transformation, notification)
-// 3. Each branch processes data independently and concurrently
-// 4. Automatically joins when all branches complete
-// 5. Aggregates results from all branches
-// 6. Sends completion notification
-//
-// Modern patterns demonstrated:
-// - Type-safe HTTP methods (WithHTTPGet, WithHTTPPost) instead of raw strings
-// - Variable/field reference helpers (VarRef, FieldRef) instead of "${...}" strings
-// - Type-safe setters (SetBool, SetString, SetVar) for different value types
-// - Export helpers (ExportAll, ExportField) for capturing response data
-// - FORK task for parallel execution with named branches
-// - Automatic join semantics (next task waits for all branches to complete)
-// - Nested task structures within branches
 func main() {
-	defer stigmer.Complete()
+	err := stigmer.Run(func(ctx *stigmer.Context) error {
+		// Context for configuration
+		apiBase := ctx.SetString("apiBase", "https://api.example.com")
+		timeout := ctx.SetInt("timeout", 60)
+		
+		// Create workflow
+		wf, err := workflow.New(ctx,
+			workflow.WithNamespace("parallel-processing"),
+			workflow.WithName("parallel-data-fetch"),
+			workflow.WithVersion("1.0.0"),
+			workflow.WithDescription("Fetch data from multiple sources in parallel"),
+		)
+		if err != nil {
+			return err
+		}
 
-	// Task 1: Fetch data to process
-	// Using JSONPlaceholder - a free fake REST API for testing and prototyping
-	// ExportAll() makes entire response available to parallel branches
-	fetchTask := workflow.HttpCallTask("fetchData",
-		workflow.WithHTTPGet(), // Type-safe HTTP method
-		workflow.WithURI("https://jsonplaceholder.typicode.com/posts/1"),
-	).ExportAll() // All branches can access this data via FieldRef("title"), FieldRef("body"), etc.
-
-	// Task 2: Fork into 4 parallel branches
-	//
-	// Flow diagram - Parallel execution:
-	//   fetchData (GET /data → exports to all branches)
-	//        ↓
-	//   parallelProcessing (FORK - all branches execute concurrently)
-	//        ├─ analytics branch      (POST /posts → export result)
-	//        ├─ validation branch     (POST /posts → export result)
-	//        ├─ transformation branch (POST /posts → export result)
-	//        └─ notification branch   (POST /posts → send alert)
-	//        ↓ (automatic join - waits for ALL branches to complete)
-	//   aggregateResults (collect all branch results)
-	//        ↓
-	//   sendCompletion (POST /posts with aggregated data)
-	forkTask := workflow.ForkTask("parallelProcessing",
-		// Branch 1: Analytics processing (runs concurrently with other branches)
-		workflow.WithBranch("analytics",
-			workflow.HttpCallTask("computeAnalytics",
-				workflow.WithHTTPPost(), // Type-safe HTTP method
-				workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
-				workflow.WithBody(map[string]any{
-					"title": "Analytics Result",
-					"body":  workflow.Interpolate("Analyzing post: ", workflow.FieldRef("title")),
-					"type":  "analytics",
+		// Task 1: Fork to execute multiple tasks in parallel
+		forkTask := wf.Fork("fetchAllData",
+			workflow.ParallelBranches(
+				// Branch 1: Fetch user data
+				workflow.Branch("fetchUsers", func() *workflow.Task {
+					return wf.HttpGet("getUsers",
+						apiBase.Concat("/users"),
+						workflow.Timeout(timeout),
+					)
 				}),
-			).ExportField("id"), // Make result available to aggregateResults
-
-			workflow.SetTask("storeAnalytics",
-				workflow.SetBool("analyticsComplete", true), // ✅ Mark branch complete
-			),
-		),
-
-		// Branch 2: Validation processing (independent of other branches)
-		workflow.WithBranch("validation",
-			workflow.HttpCallTask("validateData",
-				workflow.WithHTTPPost(), // Type-safe HTTP method
-				workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
-				workflow.WithBody(map[string]any{
-					"title": "Validation Result",
-					"body":  workflow.Interpolate("Validating post: ", workflow.FieldRef("title")),
+				
+				// Branch 2: Fetch product data
+				workflow.Branch("fetchProducts", func() *workflow.Task {
+					return wf.HttpGet("getProducts",
+						apiBase.Concat("/products"),
+						workflow.Timeout(timeout),
+					)
 				}),
-			).ExportField("id"), // Export validation result
-
-			workflow.SetTask("storeValidation",
-				workflow.SetBool("validationComplete", true), // ✅ Mark branch complete
-			),
-		),
-
-		// Branch 3: Transformation processing (independent of other branches)
-		workflow.WithBranch("transformation",
-			workflow.HttpCallTask("transformData",
-				workflow.WithHTTPPost(), // Type-safe HTTP method
-				workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
-				workflow.WithBody(map[string]any{
-					"title":  "Transformation Result",
-					"body":   workflow.Interpolate("Transformed: ", workflow.FieldRef("body")),
-					"format": "json",
-				}),
-			).ExportField("id"), // Export transformed data ID
-
-			workflow.SetTask("storeTransformed",
-				workflow.SetBool("transformationComplete", true), // ✅ Mark branch complete
-			),
-		),
-
-		// Branch 4: Notification processing (fastest branch - no heavy computation)
-		workflow.WithBranch("notification",
-			workflow.HttpCallTask("sendNotification",
-				workflow.WithHTTPPost(), // Type-safe HTTP method
-				workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
-				workflow.WithBody(map[string]any{
-					"title":   "Notification",
-					"body":    workflow.Interpolate("Processing started for: ", workflow.FieldRef("title")),
-					"message": "Processing started",
+				
+				// Branch 3: Fetch orders data
+				workflow.Branch("fetchOrders", func() *workflow.Task {
+					return wf.HttpGet("getOrders",
+						apiBase.Concat("/orders"),
+						workflow.Timeout(timeout),
+					)
 				}),
 			),
+			workflow.WaitForAll(), // Wait for all branches to complete
+		)
 
-			workflow.SetTask("markNotified",
-				workflow.SetBool("notificationSent", true), // ✅ Mark branch complete
-			),
-		),
-	)
+		// Task 2: Merge results from all parallel branches
+		wf.SetVars("mergeResults",
+			"users", forkTask.Branch("fetchUsers").Field("data"),
+			"products", forkTask.Branch("fetchProducts").Field("data"),
+			"orders", forkTask.Branch("fetchOrders").Field("data"),
+			"status", "merged",
+		)
 
-	// Task 3: Aggregate results (executes after ALL parallel branches complete)
-	// VarRef reads the variables set by each branch
-	aggregateTask := workflow.SetTask("aggregateResults",
-		workflow.SetString("status", "completed"),
-		workflow.SetVar("analyticsStatus", workflow.VarRef("analyticsComplete")),           // ✅ From branch 1
-		workflow.SetVar("validationStatus", workflow.VarRef("validationComplete")),         // ✅ From branch 2
-		workflow.SetVar("transformationStatus", workflow.VarRef("transformationComplete")), // ✅ From branch 3
-		workflow.SetVar("notificationStatus", workflow.VarRef("notificationSent")),         // ✅ From branch 4
-	)
+		// Task 3: Process merged data
+		wf.SetVars("processMerged",
+			"totalRecords", "${users.length + products.length + orders.length}",
+			"completedAt", "${now()}",
+		)
 
-	// Task 4: Send completion notification with all results
-	// VarRef accesses both status variables and exported results from branches
-	completionTask := workflow.HttpCallTask("sendCompletion",
-		workflow.WithHTTPPost(), // Type-safe HTTP method
-		workflow.WithURI("https://jsonplaceholder.typicode.com/posts"),
-		workflow.WithBody(map[string]any{
-			"title":  "All Processing Complete",
-			"status": workflow.VarRef("status"), // ✅ Aggregation status
-			"body":   "All parallel branches completed successfully",
-		}),
-	)
+		log.Printf("Created workflow with parallel execution: %s", wf)
+		return nil
+	})
 
-	// Connect tasks
-	fetchTask.ThenRef(forkTask)
-	forkTask.ThenRef(aggregateTask)
-	aggregateTask.ThenRef(completionTask)
-
-	// Create workflow with all tasks
-	wf, err := workflow.New(
-		workflow.WithNamespace("data-processing"),
-		workflow.WithName("parallel-data-fetch"),
-		workflow.WithVersion("1.0.0"),
-		workflow.WithDescription("Process data in parallel branches"),
-		workflow.WithTasks(fetchTask, forkTask, aggregateTask, completionTask),
-	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("Created parallel workflow: %s", wf)
+	log.Println("✅ Workflow with parallel execution created successfully!")
 }

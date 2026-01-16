@@ -39,7 +39,7 @@ bucket := s3.NewBucket(ctx, "my-bucket", &s3.BucketArgs{
 apiBase := ctx.SetString("apiBase", "https://api.example.com")
 orgName := ctx.SetString("org", "my-org")
 
-wf, _ := workflow.NewWithContext(ctx,
+wf, _ := workflow.New(ctx,
     workflow.WithOrg(orgName),  // Use config
 )
 
@@ -763,7 +763,7 @@ ctx.SetString("apiBase", ...)  // config
 func TestImplicitDependencies(t *testing.T) {
     ctx := stigmer.NewTestContext()
     
-    wf, _ := workflow.NewWithContext(ctx,
+    wf, _ := workflow.New(ctx,
         workflow.WithName("test"),
     )
     
@@ -785,7 +785,7 @@ func TestWorkflowSynthesis(t *testing.T) {
     err := stigmer.Run(func(ctx *stigmer.Context) error {
         apiBase := ctx.SetString("apiBase", "https://api.example.com")
         
-        wf, _ := workflow.NewWithContext(ctx,
+        wf, _ := workflow.New(ctx,
             workflow.WithName("test"),
         )
         

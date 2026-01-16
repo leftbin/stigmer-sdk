@@ -46,7 +46,7 @@ stigmer.Run(func(ctx *stigmer.Context) error {
     retries := ctx.SetInt("retries", 3)
     
     // Use in workflow - compile-time checked!
-    wf, _ := workflow.NewWithContext(ctx,
+    wf, _ := workflow.New(ctx,
         workflow.WithTasks(
             workflow.HttpCallTask("fetch",
                 workflow.WithURI(apiURL.Concat("/data")),  // Type-safe!
@@ -56,7 +56,7 @@ stigmer.Run(func(ctx *stigmer.Context) error {
     )
     
     // Use in agent - same context!
-    ag, _ := agent.NewWithContext(ctx,
+    ag, _ := agent.New(ctx,
         agent.WithOrg(orgName),  // Shared typed reference
     )
     
@@ -221,7 +221,7 @@ wf, _ := workflow.New(
 stigmer.Run(func(ctx *stigmer.Context) error {
     apiURL := ctx.SetString("apiURL", "https://api.example.com")
     
-    wf, _ := workflow.NewWithContext(ctx,
+    wf, _ := workflow.New(ctx,
         workflow.WithName("my-workflow"),
         workflow.WithTasks(
             workflow.HttpCallTask("fetch",
@@ -236,7 +236,7 @@ stigmer.Run(func(ctx *stigmer.Context) error {
 
 **Phase 2 - Deprecation** (future):
 - Mark old `workflow.New()` as deprecated
-- Recommend `workflow.NewWithContext()` in docs
+- Recommend `workflow.New()` in docs
 - Provide migration guide
 
 **Phase 3 - Breaking Change** (far future):
@@ -331,7 +331,7 @@ stigmer.Run(func(ctx1 *stigmer.Context) error {
     
     stigmer.Run(func(ctx2 *stigmer.Context) error {
         // Can't use apiURL from ctx1 here
-        workflow.NewWithContext(ctx2, ...)  // Won't have apiURL
+        workflow.New(ctx2, ...)  // Won't have apiURL
         return nil
     })
     
@@ -345,8 +345,8 @@ stigmer.Run(func(ctx1 *stigmer.Context) error {
 stigmer.Run(func(ctx *stigmer.Context) error {
     apiURL := ctx.SetString("apiURL", "...")
     
-    wf, _ := workflow.NewWithContext(ctx, ...)  // Has apiURL
-    ag, _ := agent.NewWithContext(ctx, ...)     // Has apiURL
+    wf, _ := workflow.New(ctx, ...)  // Has apiURL
+    ag, _ := agent.New(ctx, ...)     // Has apiURL
     
     return nil
 })
@@ -4055,7 +4055,7 @@ flowchart TB
 //	    apiBase := ctx.SetString("apiBase", "https://api.example.com")
 //	    
 //	    // Create workflow
-//	    wf, _ := workflow.NewWithContext(ctx, ...)
+//	    wf, _ := workflow.New(ctx, ...)
 //	    
 //	    // Tasks with implicit dependencies
 //	    fetchTask := wf.HttpGet("fetch", endpoint)

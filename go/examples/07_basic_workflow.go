@@ -45,7 +45,7 @@ func main() {
 		}
 
 		// Create workflow with context
-		wf, err := workflow.NewWithContext(ctx,
+		wf, err := workflow.New(ctx,
 			// Required metadata
 			workflow.WithNamespace("data-processing"),
 			workflow.WithName("basic-data-fetch"),

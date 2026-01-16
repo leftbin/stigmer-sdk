@@ -173,7 +173,7 @@ func TestExample07_BasicWorkflow(t *testing.T) {
 		if workflow.Spec == nil || workflow.Spec.Document == nil {
 			t.Fatal("Workflow spec or document is nil")
 		}
-		
+
 		if workflow.Spec.Document.Namespace != "data-processing" {
 			t.Errorf("Workflow namespace = %v, want data-processing", workflow.Spec.Document.Namespace)
 		}
@@ -210,7 +210,7 @@ func TestExample08_WorkflowWithConditionals(t *testing.T) {
 		if workflow.Spec == nil || workflow.Spec.Document == nil {
 			t.Fatal("Workflow spec or document is nil")
 		}
-		
+
 		if workflow.Spec.Document.Name != "conditional-deployment" {
 			t.Errorf("Workflow name = %v, want conditional-deployment", workflow.Spec.Document.Name)
 		}
@@ -239,7 +239,7 @@ func TestExample09_WorkflowWithLoops(t *testing.T) {
 		if workflow.Spec == nil || workflow.Spec.Document == nil {
 			t.Fatal("Workflow spec or document is nil")
 		}
-		
+
 		if workflow.Spec.Document.Name != "batch-processor" {
 			t.Errorf("Workflow name = %v, want batch-processor", workflow.Spec.Document.Name)
 		}
@@ -268,7 +268,7 @@ func TestExample10_WorkflowWithErrorHandling(t *testing.T) {
 		if workflow.Spec == nil || workflow.Spec.Document == nil {
 			t.Fatal("Workflow spec or document is nil")
 		}
-		
+
 		if workflow.Spec.Document.Name != "resilient-api-call" {
 			t.Errorf("Workflow name = %v, want resilient-api-call", workflow.Spec.Document.Name)
 		}
@@ -297,7 +297,7 @@ func TestExample11_WorkflowWithParallelExecution(t *testing.T) {
 		if workflow.Spec == nil || workflow.Spec.Document == nil {
 			t.Fatal("Workflow spec or document is nil")
 		}
-		
+
 		if workflow.Spec.Document.Name != "parallel-data-fetch" {
 			t.Errorf("Workflow name = %v, want parallel-data-fetch", workflow.Spec.Document.Name)
 		}
@@ -309,9 +309,9 @@ func TestExample11_WorkflowWithParallelExecution(t *testing.T) {
 	})
 }
 
-// TestExample08_AgentWithTypedContext tests the agent with typed context example
-func TestExample08_AgentWithTypedContext(t *testing.T) {
-	runExampleTest(t, "08_agent_with_typed_context.go", func(t *testing.T, outputDir string) {
+// TestExample12_AgentWithTypedContext tests the agent with typed context example
+func TestExample12_AgentWithTypedContext(t *testing.T) {
+	runExampleTest(t, "12_agent_with_typed_context.go", func(t *testing.T, outputDir string) {
 		manifestPath := filepath.Join(outputDir, "agent-manifest.pb")
 		assertFileExists(t, manifestPath)
 
@@ -337,12 +337,12 @@ func TestExample08_AgentWithTypedContext(t *testing.T) {
 		if agent.Instructions == "" {
 			t.Error("Agent should have instructions")
 		}
-		
+
 		// Verify agent has skills (demonstrates complete agent configuration)
 		if len(agent.Skills) == 0 {
 			t.Error("Agent should have skills")
 		}
-		
+
 		// Verify agent has MCP servers
 		if len(agent.McpServers) == 0 {
 			t.Error("Agent should have MCP servers")
@@ -350,13 +350,13 @@ func TestExample08_AgentWithTypedContext(t *testing.T) {
 	})
 }
 
-// TestExample09_WorkflowAndAgentSharedContext tests the workflow and agent with shared context example
-func TestExample09_WorkflowAndAgentSharedContext(t *testing.T) {
-	runExampleTest(t, "09_workflow_and_agent_shared_context.go", func(t *testing.T, outputDir string) {
+// TestExample13_WorkflowAndAgentSharedContext tests the workflow and agent with shared context example
+func TestExample13_WorkflowAndAgentSharedContext(t *testing.T) {
+	runExampleTest(t, "13_workflow_and_agent_shared_context.go", func(t *testing.T, outputDir string) {
 		// This example creates BOTH workflow and agent manifests
 		workflowManifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
 		agentManifestPath := filepath.Join(outputDir, "agent-manifest.pb")
-		
+
 		// Verify both manifests were created
 		assertFileExists(t, workflowManifestPath)
 		assertFileExists(t, agentManifestPath)
@@ -400,7 +400,7 @@ func TestExample09_WorkflowAndAgentSharedContext(t *testing.T) {
 		if agent.Instructions == "" {
 			t.Error("Agent should have instructions")
 		}
-		
+
 		// Both workflow and agent should be configured with shared context
 		// This example demonstrates that both can use the same context for configuration
 		// The key point is that both manifests are created successfully from the same context
@@ -425,7 +425,7 @@ func runExampleTest(t *testing.T, exampleFile string, verify func(*testing.T, st
 	// Run the example with STIGMER_OUT_DIR set
 	cmd := exec.Command("go", "run", examplePath)
 	cmd.Env = append(os.Environ(), "STIGMER_OUT_DIR="+outputDir)
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to run example %s: %v\nOutput: %s", exampleFile, err, string(output))

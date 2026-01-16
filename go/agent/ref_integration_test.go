@@ -10,7 +10,7 @@ import (
 func TestAgent_NewWithContext(t *testing.T) {
 	ctx := stigmer.NewContext()
 
-	ag, err := agent.NewWithContext(ctx,
+	ag, err := agent.New(ctx,
 		agent.WithName("code-reviewer"),
 		agent.WithInstructions("Review code and suggest improvements"),
 		agent.WithDescription("AI code reviewer"),
@@ -60,7 +60,7 @@ func TestAgentBuilder_WithNameStringRef(t *testing.T) {
 	ctx := stigmer.NewContext()
 	agentName := ctx.SetString("agentName", "code-reviewer")
 
-	ag, err := agent.NewWithContext(ctx,
+	ag, err := agent.New(ctx,
 		agent.WithName(agentName),
 		agent.WithInstructions("Review code"),
 	)
@@ -97,7 +97,7 @@ func TestAgentBuilder_WithInstructionsStringRef(t *testing.T) {
 	ctx := stigmer.NewContext()
 	instructions := ctx.SetString("instructions", "Review code and suggest improvements based on best practices")
 
-	ag, err := agent.NewWithContext(ctx,
+	ag, err := agent.New(ctx,
 		agent.WithName("code-reviewer"),
 		agent.WithInstructions(instructions),
 	)
@@ -133,7 +133,7 @@ func TestAgentBuilder_WithDescriptionStringRef(t *testing.T) {
 	ctx := stigmer.NewContext()
 	description := ctx.SetString("description", "AI-powered code reviewer")
 
-	ag, err := agent.NewWithContext(ctx,
+	ag, err := agent.New(ctx,
 		agent.WithName("code-reviewer"),
 		agent.WithInstructions("Review code"),
 		agent.WithDescription(description),
@@ -171,7 +171,7 @@ func TestAgentBuilder_WithIconURLStringRef(t *testing.T) {
 	ctx := stigmer.NewContext()
 	iconURL := ctx.SetString("iconURL", "https://example.com/icon.png")
 
-	ag, err := agent.NewWithContext(ctx,
+	ag, err := agent.New(ctx,
 		agent.WithName("code-reviewer"),
 		agent.WithInstructions("Review code"),
 		agent.WithIconURL(iconURL),
@@ -209,7 +209,7 @@ func TestAgentBuilder_WithOrgStringRef(t *testing.T) {
 	ctx := stigmer.NewContext()
 	org := ctx.SetString("org", "my-organization")
 
-	ag, err := agent.NewWithContext(ctx,
+	ag, err := agent.New(ctx,
 		agent.WithName("code-reviewer"),
 		agent.WithInstructions("Review code"),
 		agent.WithOrg(org),
@@ -249,7 +249,7 @@ func TestAgentBuilder_MixedTypedAndLegacy(t *testing.T) {
 	description := ctx.SetString("description", "AI reviewer")
 
 	// Mix typed context variables with legacy strings
-	ag, err := agent.NewWithContext(ctx,
+	ag, err := agent.New(ctx,
 		agent.WithName(agentName),                              // Typed
 		agent.WithInstructions("Review code and suggest fixes"), // Legacy string
 		agent.WithDescription(description),                      // Typed
@@ -279,7 +279,7 @@ func TestAgentBuilder_StringRefConcat(t *testing.T) {
 	baseURL := ctx.SetString("baseURL", "https://example.com")
 	iconPath := baseURL.Concat("/icons/reviewer.png")
 
-	ag, err := agent.NewWithContext(ctx,
+	ag, err := agent.New(ctx,
 		agent.WithName("code-reviewer"),
 		agent.WithInstructions("Review code"),
 		agent.WithIconURL(iconPath),

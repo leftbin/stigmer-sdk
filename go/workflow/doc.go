@@ -13,7 +13,7 @@
 //	    orgName := ctx.SetString("org", "my-org")
 //	    
 //	    // Create workflow
-//	    wf, err := workflow.NewWithContext(ctx,
+//	    wf, err := workflow.New(ctx,
 //	        workflow.WithNamespace("data-processing"),
 //	        workflow.WithName("daily-sync"),
 //	        workflow.WithVersion("1.0.0"),
@@ -117,7 +117,7 @@
 //	timeout := ctx.SetInt("timeout", 30)
 //	
 //	// Use in workflow metadata
-//	wf, _ := workflow.NewWithContext(ctx,
+//	wf, _ := workflow.New(ctx,
 //	    workflow.WithOrg(orgName),
 //	)
 //	
@@ -178,7 +178,7 @@
 //	    environment.WithDescription("API authentication token"),
 //	)
 //	
-//	wf, _ := workflow.NewWithContext(ctx,
+//	wf, _ := workflow.New(ctx,
 //	    workflow.WithName("my-workflow"),
 //	    workflow.WithEnvironmentVariable(apiToken),
 //	)
@@ -232,7 +232,7 @@
 //	        )
 //	        
 //	        // Create workflow
-//	        wf, _ := workflow.NewWithContext(ctx,
+//	        wf, _ := workflow.New(ctx,
 //	            workflow.WithNamespace("data-processing"),
 //	            workflow.WithName("user-sync"),
 //	            workflow.WithVersion("1.0.0"),

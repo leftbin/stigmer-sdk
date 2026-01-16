@@ -13,45 +13,69 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/agent"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/subagent"
 )
 
 func main() {
-	defer stigmer.Complete()
+	err := stigmer.Run(func(ctx *stigmer.Context) error {
+		fmt.Println("=== Example 04: Agent with Sub-Agents ===\n")
 
-	fmt.Println("=== Example 04: Agent with Sub-Agents ===\n")
+		// Example 1: Simple inline sub-agent
+		simpleAgent, err := createSimpleAgentWithSubAgent(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("1. Simple Agent with Inline Sub-Agent", simpleAgent)
 
-	// Example 1: Simple inline sub-agent
-	simpleAgent := createSimpleAgentWithSubAgent()
-	printAgent("1. Simple Agent with Inline Sub-Agent", simpleAgent)
+		// Example 2: Referenced sub-agent
+		agentWithReference, err := createAgentWithReferencedSubAgent(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("2. Agent with Referenced Sub-Agent", agentWithReference)
 
-	// Example 2: Referenced sub-agent
-	agentWithReference := createAgentWithReferencedSubAgent()
-	printAgent("2. Agent with Referenced Sub-Agent", agentWithReference)
+		// Example 3: Complex agent with multiple sub-agents
+		complexAgent, err := createComplexAgentWithMultipleSubAgents(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("3. Complex Agent with Multiple Sub-Agents", complexAgent)
 
-	// Example 3: Complex agent with multiple sub-agents
-	complexAgent := createComplexAgentWithMultipleSubAgents()
-	printAgent("3. Complex Agent with Multiple Sub-Agents", complexAgent)
+		// Example 4: Inline sub-agent with MCP server references
+		agentWithMCPSubAgent, err := createAgentWithMCPSubAgent(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("4. Agent with Sub-Agent Using MCP Servers", agentWithMCPSubAgent)
 
-	// Example 4: Inline sub-agent with MCP server references
-	agentWithMCPSubAgent := createAgentWithMCPSubAgent()
-	printAgent("4. Agent with Sub-Agent Using MCP Servers", agentWithMCPSubAgent)
+		// Example 5: Inline sub-agent with skills
+		agentWithSkilledSubAgent, err := createAgentWithSkilledSubAgent(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("5. Agent with Sub-Agent Using Skills", agentWithSkilledSubAgent)
 
-	// Example 5: Inline sub-agent with skills
-	agentWithSkilledSubAgent := createAgentWithSkilledSubAgent()
-	printAgent("5. Agent with Sub-Agent Using Skills", agentWithSkilledSubAgent)
+		// Example 6: Inline sub-agent with tool selections
+		agentWithSelectiveSubAgent, err := createAgentWithSelectiveSubAgent(ctx)
+		if err != nil {
+			return err
+		}
+		printAgent("6. Agent with Sub-Agent Using Tool Selections", agentWithSelectiveSubAgent)
 
-	// Example 6: Inline sub-agent with tool selections
-	agentWithSelectiveSubAgent := createAgentWithSelectiveSubAgent()
-	printAgent("6. Agent with Sub-Agent Using Tool Selections", agentWithSelectiveSubAgent)
+		return nil
+	})
+
+	if err != nil {
+		log.Fatalf("Failed to run example: %v", err)
+	}
 }
 
 // Example 1: Simple inline sub-agent
-func createSimpleAgentWithSubAgent() *agent.Agent {
+func createSimpleAgentWithSubAgent(ctx *stigmer.Context) (*agent.Agent, error) {
 	// Create inline sub-agent
 	securityScanner, err := subagent.Inline(
 		subagent.WithName("security-scanner"),
@@ -59,24 +83,24 @@ func createSimpleAgentWithSubAgent() *agent.Agent {
 		subagent.WithDescription("Security-focused code analyzer"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create sub-agent: %v", err)
+		return nil, fmt.Errorf("failed to create sub-agent: %w", err)
 	}
 
-	ag, err := agent.New(
+	ag, err := agent.New(ctx,
 		agent.WithName("code-reviewer"),
 		agent.WithInstructions("Review code changes and coordinate with specialized sub-agents for deeper analysis"),
 		agent.WithDescription("Main code review orchestrator"),
 		agent.WithSubAgent(securityScanner),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Example 2: Referenced sub-agent
-func createAgentWithReferencedSubAgent() *agent.Agent {
-	ag, err := agent.New(
+func createAgentWithReferencedSubAgent(ctx *stigmer.Context) (*agent.Agent, error) {
+	ag, err := agent.New(ctx,
 		agent.WithName("deployment-orchestrator"),
 		agent.WithInstructions("Orchestrate deployment process by delegating to specialized agents"),
 		agent.WithDescription("Main deployment coordinator"),
@@ -86,13 +110,13 @@ func createAgentWithReferencedSubAgent() *agent.Agent {
 		)),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Example 3: Complex agent with multiple sub-agents (inline and referenced)
-func createComplexAgentWithMultipleSubAgents() *agent.Agent {
+func createComplexAgentWithMultipleSubAgents(ctx *stigmer.Context) (*agent.Agent, error) {
 	// Create inline sub-agents
 	codeQualityChecker, err := subagent.Inline(
 		subagent.WithName("code-quality-checker"),
@@ -100,7 +124,7 @@ func createComplexAgentWithMultipleSubAgents() *agent.Agent {
 		subagent.WithDescription("Code quality analyzer"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create code quality checker: %v", err)
+		return nil, fmt.Errorf("failed to create code quality checker: %w", err)
 	}
 
 	testRunner, err := subagent.Inline(
@@ -109,10 +133,10 @@ func createComplexAgentWithMultipleSubAgents() *agent.Agent {
 		subagent.WithDescription("Test execution coordinator"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create test runner: %v", err)
+		return nil, fmt.Errorf("failed to create test runner: %w", err)
 	}
 
-	ag, err := agent.New(
+	ag, err := agent.New(ctx,
 		agent.WithName("ci-cd-orchestrator"),
 		agent.WithInstructions("Manage the entire CI/CD pipeline by delegating to specialized agents"),
 		agent.WithDescription("Complete CI/CD pipeline orchestrator"),
@@ -126,13 +150,13 @@ func createComplexAgentWithMultipleSubAgents() *agent.Agent {
 		),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Example 4: Inline sub-agent with MCP server references
-func createAgentWithMCPSubAgent() *agent.Agent {
+func createAgentWithMCPSubAgent(ctx *stigmer.Context) (*agent.Agent, error) {
 	// Create MCP servers for the main agent
 	github, err := mcpserver.Stdio(
 		mcpserver.WithName("github"),
@@ -141,7 +165,7 @@ func createAgentWithMCPSubAgent() *agent.Agent {
 		mcpserver.WithEnvPlaceholder("GITHUB_TOKEN", "${GITHUB_TOKEN}"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create GitHub MCP server: %v", err)
+		return nil, fmt.Errorf("failed to create GitHub MCP server: %w", err)
 	}
 
 	gitlab, err := mcpserver.Stdio(
@@ -151,7 +175,7 @@ func createAgentWithMCPSubAgent() *agent.Agent {
 		mcpserver.WithEnvPlaceholder("GITLAB_TOKEN", "${GITLAB_TOKEN}"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create GitLab MCP server: %v", err)
+		return nil, fmt.Errorf("failed to create GitLab MCP server: %w", err)
 	}
 
 	// Create inline sub-agents
@@ -162,7 +186,7 @@ func createAgentWithMCPSubAgent() *agent.Agent {
 		subagent.WithMCPServer("github"), // References the parent's MCP server
 	)
 	if err != nil {
-		log.Fatalf("Failed to create github specialist: %v", err)
+		return nil, fmt.Errorf("failed to create github specialist: %w", err)
 	}
 
 	crossPlatformSync, err := subagent.Inline(
@@ -172,11 +196,11 @@ func createAgentWithMCPSubAgent() *agent.Agent {
 		subagent.WithMCPServers("github", "gitlab"), // Uses multiple MCP servers
 	)
 	if err != nil {
-		log.Fatalf("Failed to create cross-platform sync: %v", err)
+		return nil, fmt.Errorf("failed to create cross-platform sync: %w", err)
 	}
 
 	// Create agent with sub-agent that uses the MCP servers
-	ag, err := agent.New(
+	ag, err := agent.New(ctx,
 		agent.WithName("multi-repo-manager"),
 		agent.WithInstructions("Manage repositories across multiple platforms"),
 		agent.WithDescription("Multi-platform repository manager"),
@@ -184,13 +208,13 @@ func createAgentWithMCPSubAgent() *agent.Agent {
 		agent.WithSubAgents(githubSpecialist, crossPlatformSync),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Example 5: Inline sub-agent with skills
-func createAgentWithSkilledSubAgent() *agent.Agent {
+func createAgentWithSkilledSubAgent(ctx *stigmer.Context) (*agent.Agent, error) {
 	// Create inline sub-agent with skills
 	codingExpert, err := subagent.Inline(
 		subagent.WithName("coding-expert"),
@@ -204,23 +228,23 @@ func createAgentWithSkilledSubAgent() *agent.Agent {
 		),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create coding expert: %v", err)
+		return nil, fmt.Errorf("failed to create coding expert: %w", err)
 	}
 
-	ag, err := agent.New(
+	ag, err := agent.New(ctx,
 		agent.WithName("development-assistant"),
 		agent.WithInstructions("Assist with software development tasks by leveraging specialized knowledge"),
 		agent.WithDescription("Intelligent development assistant"),
 		agent.WithSubAgent(codingExpert),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Example 6: Inline sub-agent with tool selections
-func createAgentWithSelectiveSubAgent() *agent.Agent {
+func createAgentWithSelectiveSubAgent(ctx *stigmer.Context) (*agent.Agent, error) {
 	github, err := mcpserver.Stdio(
 		mcpserver.WithName("github"),
 		mcpserver.WithCommand("npx"),
@@ -228,7 +252,7 @@ func createAgentWithSelectiveSubAgent() *agent.Agent {
 		mcpserver.WithEnvPlaceholder("GITHUB_TOKEN", "${GITHUB_TOKEN}"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create GitHub MCP server: %v", err)
+		return nil, fmt.Errorf("failed to create GitHub MCP server: %w", err)
 	}
 
 	// Create inline sub-agents with tool selections
@@ -240,7 +264,7 @@ func createAgentWithSelectiveSubAgent() *agent.Agent {
 		subagent.WithToolSelection("github", "create_issue", "update_issue", "list_issues"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create issue manager: %v", err)
+		return nil, fmt.Errorf("failed to create issue manager: %w", err)
 	}
 
 	prReviewer, err := subagent.Inline(
@@ -251,10 +275,10 @@ func createAgentWithSelectiveSubAgent() *agent.Agent {
 		subagent.WithToolSelection("github", "list_pull_requests", "review_pull_request", "comment_on_pr"),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create PR reviewer: %v", err)
+		return nil, fmt.Errorf("failed to create PR reviewer: %w", err)
 	}
 
-	ag, err := agent.New(
+	ag, err := agent.New(ctx,
 		agent.WithName("selective-github-bot"),
 		agent.WithInstructions("Manage GitHub operations with specialized sub-agents"),
 		agent.WithDescription("GitHub bot with selective tool access"),
@@ -262,9 +286,9 @@ func createAgentWithSelectiveSubAgent() *agent.Agent {
 		agent.WithSubAgents(issueManager, prReviewer),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create agent: %v", err)
+		return nil, fmt.Errorf("failed to create agent: %w", err)
 	}
-	return ag
+	return ag, nil
 }
 
 // Helper function to print agent and its proto representation
