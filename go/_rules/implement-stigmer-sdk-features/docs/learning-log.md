@@ -19,7 +19,120 @@ This log captures all learnings, discoveries, and solutions from implementing an
 
 ## Workflow SDK Implementation
 
-**Topic Coverage**: Workflow package architecture, task builders, multi-layer validation, fluent API patterns
+**Topic Coverage**: Workflow package architecture, task builders, multi-layer validation, fluent API patterns, expression generation
+
+### 2026-01-16 - Expression Generation for JQ Evaluator (CRITICAL BUG FIX)
+
+**Problem**: All workflows using SDK expression helpers failed at runtime with "variable not found" errors. Expressions like `${.apiURL}` were generated but JQ evaluator couldn't resolve context variables.
+
+**Root Cause**: 
+- Workflow-runner uses JQ for expression evaluation
+- JQ requires explicit `$context` reference to access workflow context variables
+- SDK was generating `${.varName}` (dot-prefix) which is only valid for task output fields
+- Missing `$context` prefix caused runtime errors when trying to access workflow variables
+
+**Solution**: Updated all expression helper functions to generate correct JQ format
+
+**Fixed Functions** (21 total):
+```go
+// Context Variable References
+func VarRef(varName string) string {
+    // BEFORE: return fmt.Sprintf("${.%s}", varName)  // ❌ Wrong scope
+    // AFTER:
+    return fmt.Sprintf("${ $context.%s }", varName)  // ✅ Correct
+}
+
+func FieldRef(fieldPath string) string {
+    return fmt.Sprintf("${ $context.%s }", fieldPath)
+}
+
+// Arithmetic Operations
+func Increment(varName string) string {
+    // BEFORE: return fmt.Sprintf("${%s + 1}", varName)  // ❌ Missing $context
+    // AFTER:
+    return fmt.Sprintf("${ $context.%s + 1 }", varName)  // ✅
+}
+
+func Decrement(varName string) string {
+    return fmt.Sprintf("${ $context.%s - 1 }", varName)
+}
+
+// Condition Builders
+func Var(varName string) string {
+    // Used in conditions (returns without ${ } wrapper)
+    // BEFORE: return varName  // ❌ Just "apiURL"
+    // AFTER:
+    return fmt.Sprintf("$context.%s", varName)  // ✅ "$context.apiURL"
+}
+
+// All comparison operators now use proper spacing
+func Equals(left, right string) string {
+    // BEFORE: return fmt.Sprintf("${%s == %s}", left, right)  // ❌ No spacing
+    // AFTER:
+    return fmt.Sprintf("${ %s == %s }", left, right)  // ✅ With spaces
+}
+```
+
+**IMPORTANT**: Error field accessors are DIFFERENT - they use dot-prefix (not `$context`):
+```go
+// Error variables are in task output scope, NOT workflow context
+func ErrorMessage(errorVar string) string {
+    return fmt.Sprintf("${ .%s.message }", errorVar)  // ✅ Correct (not $context)
+}
+
+// Why different? Error variables caught in CATCH blocks are stored
+// in current task's output context (accessed with .error), 
+// not in workflow context (accessed with $context.var)
+```
+
+**JQ Context Structure**:
+```json
+{
+  "$context": {
+    "apiURL": "https://api.example.com",
+    "retryCount": 0,
+    "status": "starting"
+  },
+  "body": { "...": "task output" },
+  "headers": { "...": "task output" }
+}
+```
+
+**Variable Access Rules**:
+- Workflow context variables: `$context.varName` ✅
+- Task output fields: `.field` ✅
+- Error objects (caught in CATCH): `.errorVar` ✅
+- Just `.varName` without proper scope: ❌ Not found
+
+**Prevention**: 
+- Always use `$context` prefix for workflow context variables
+- Use dot-prefix (`.field`) only for task output fields
+- Understand JQ scope semantics (context vs output)
+- Test expressions with comprehensive test cases
+
+**Testing**: Created comprehensive test suite with 50+ test cases
+
+**Example Usage**:
+```go
+// Context variables
+VarRef("apiURL")           → "${ $context.apiURL }"
+Increment("retryCount")    → "${ $context.retryCount + 1 }"
+Var("env")                 → "$context.env"  // For conditions
+
+// Task output fields
+Field("status")            → ".status"  // For conditions
+ErrorMessage("httpErr")    → "${ .httpErr.message }"
+
+// Interpolation
+Interpolate(VarRef("apiURL"), "/posts/1")
+→ "${ $context.apiURL + \"/posts/1\" }"
+```
+
+**Impact**: Fixed ALL workflows using dynamic expressions. This was a critical bug affecting every workflow that referenced context variables.
+
+**Cross-Reference**: Python SDK doesn't have this issue as Python synthesis generates YAML directly. This is Go SDK specific due to how workflow-runner's JQ evaluator works.
+
+---
 
 ### 2026-01-15 - Complete Workflow SDK with 12 Task Types
 
@@ -1703,7 +1816,178 @@ func TestWorkflow_Creation(t *testing.T) {
 
 ## Testing Patterns
 
-**Topic Coverage**: Table-driven tests, test fixtures, mocking, integration tests
+**Topic Coverage**: Table-driven tests, test fixtures, mocking, integration tests, expression testing
+
+### 2026-01-16 - Comprehensive Expression Testing Pattern
+
+**Problem**: Expression helper functions are critical for workflow functionality but were untested, leading to bugs like incorrect JQ format that broke all dynamic expressions.
+
+**Root Cause**:
+- Expression helpers generate string outputs (JQ expressions)
+- Easy to make formatting mistakes (`${.var}` vs `${ $context.var }`)
+- No tests to catch expression format errors
+- Bugs only discovered at runtime when workflows execute
+
+**Solution**: Create comprehensive test suite with 50+ test cases covering all expression types and edge cases
+
+**Implementation Pattern**:
+
+```go
+// File: workflow/expression_test.go
+
+// Test basic expression generation
+func TestVarRef(t *testing.T) {
+    tests := []struct {
+        name     string
+        varName  string
+        expected string
+    }{
+        {
+            name:     "simple variable",
+            varName:  "apiURL",
+            expected: "${ $context.apiURL }",
+        },
+        {
+            name:     "counter variable",
+            varName:  "retryCount",
+            expected: "${ $context.retryCount }",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := VarRef(tt.varName)
+            if result != tt.expected {
+                t.Errorf("VarRef(%q) = %q, want %q", 
+                    tt.varName, result, tt.expected)
+            }
+        })
+    }
+}
+
+// Test complex interpolation scenarios
+func TestComplexInterpolation(t *testing.T) {
+    tests := []struct {
+        name     string
+        build    func() string
+        expected string
+    }{
+        {
+            name: "API URL with version and path",
+            build: func() string {
+                baseURL := VarRef("baseURL")
+                version := VarRef("version")
+                return Interpolate(baseURL, "/v", version, "/posts/1")
+            },
+            expected: "${ $context.baseURL + \"/v\" + $context.version + \"/posts/1\" }",
+        },
+        {
+            name: "Authorization header",
+            build: func() string {
+                token := VarRef("token")
+                return Interpolate("Bearer ", token)
+            },
+            expected: "${ \"Bearer \" + $context.token }",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := tt.build()
+            if result != tt.expected {
+                t.Errorf("%s = %q, want %q", tt.name, result, tt.expected)
+            }
+        })
+    }
+}
+
+// Test all condition builders
+func TestConditionBuilders(t *testing.T) {
+    tests := []struct {
+        name     string
+        build    func() string
+        expected string
+    }{
+        {
+            name: "field equals number",
+            build: func() string {
+                return Equals(Field("status"), Number(200))
+            },
+            expected: "${ .status == 200 }",
+        },
+        {
+            name: "context var equals literal",
+            build: func() string {
+                return Equals(Var("apiURL"), Literal("https://api.example.com"))
+            },
+            expected: "${ $context.apiURL == \"https://api.example.com\" }",
+        },
+        {
+            name: "AND condition",
+            build: func() string {
+                return And(
+                    Equals(Field("status"), Number(200)),
+                    Equals(Field("type"), Literal("success")),
+                )
+            },
+            expected: "${ .status == 200 && .type == \"success\" }",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := tt.build()
+            if result != tt.expected {
+                t.Errorf("%s = %q, want %q", tt.name, result, tt.expected)
+            }
+        })
+    }
+}
+```
+
+**Testing Strategy**:
+1. **Test Each Helper Function**: Separate test function for each expression helper
+2. **Table-Driven Tests**: Use test tables for multiple scenarios
+3. **Exact String Matching**: Validate exact format including spaces
+4. **Edge Cases**: Test with special characters, nested expressions, empty strings
+5. **Complex Scenarios**: Test real-world usage patterns
+6. **Builder Functions**: Use functions in test cases to build complex expressions
+
+**Benefits**:
+- ✅ Catches format errors immediately
+- ✅ Documents expected output format
+- ✅ Prevents regressions when refactoring
+- ✅ Validates all expression types comprehensively
+- ✅ Easy to add new test cases
+- ✅ Clear error messages show exact diff
+
+**Coverage**:
+- Basic expressions: VarRef, FieldRef, Increment, Decrement
+- Interpolation: Single part, multiple parts, plain strings
+- Custom expressions: Expr with various formats
+- Error helpers: ErrorMessage, ErrorCode, ErrorStackTrace, ErrorObject
+- Conditions: Equals, NotEquals, GreaterThan, etc.
+- Logical operators: And, Or, Not
+- Complex scenarios: Nested expressions, real-world patterns
+
+**Prevention**:
+- Always add tests when creating new expression helpers
+- Test exact format including spacing and prefixes
+- Include edge cases and special characters
+- Use table-driven tests for multiple scenarios
+- Test both individual functions and compositions
+- Validate with actual workflow execution if possible
+
+**Example Output**:
+```bash
+go test ./workflow
+# ok  	github.com/leftbin/stigmer-sdk/go/workflow	0.518s
+# 50+ test cases all passing
+```
+
+**Impact**: This testing pattern caught the `$context` bug immediately when tests were added, and will prevent similar bugs in the future.
+
+---
 
 ### 2026-01-13 - Test Helper Pattern for API Migration
 
