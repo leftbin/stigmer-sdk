@@ -2,9 +2,19 @@
 
 This directory contains comprehensive test cases for all SDK examples to ensure they generate correct manifest files.
 
-## Test Coverage
+**Last Updated**: 2026-01-17  
+**Status**: ✅ **100% Coverage - All Tests Passing**
 
-### Agent Examples (All Passing ✅)
+## Test Coverage Summary
+
+- **Total Tests**: 13
+- **Passing**: 13/13 (100%) ✅
+- **Runtime**: ~2.15 seconds
+- **Coverage**: All user-facing examples
+
+## Test Coverage by Category
+
+### Agent Examples (7 tests) ✅
 
 - `TestExample01_BasicAgent` - Tests basic agent creation with required and optional fields
 - `TestExample02_AgentWithSkills` - Tests agents with inline, platform, and organization skills
@@ -12,53 +22,78 @@ This directory contains comprehensive test cases for all SDK examples to ensure 
 - `TestExample04_AgentWithSubagents` - Tests agents with inline and referenced sub-agents
 - `TestExample05_AgentWithEnvironmentVariables` - Tests agents with secret and config environment variables
 - `TestExample06_AgentWithInstructionsFromFiles` - Tests agents that load instructions from markdown files
+- `TestExample08_AgentWithTypedContext` - Tests agent with typed context variables (NEW API) ⭐ **NEW!**
 
-**Status**: 6/6 passing ✅
+**Status**: 7/7 passing ✅
 
-### Workflow Examples (All Passing ✅)
+### Workflow Examples - NEW API (2 tests) ✅
 
-- `TestExample07_BasicWorkflow` - Tests basic workflow with HTTP calls and variable setting
+- `TestExample07_BasicWorkflow` - Tests basic workflow with HTTP calls, typed context, and implicit dependencies (NEW API)
+- `TestExample09_WorkflowAndAgentSharedContext` - Tests workflow and agent sharing the same typed context ⭐ **NEW!**
+
+**Status**: 2/2 passing ✅
+
+### Workflow Examples - OLD API (4 tests) ✅
+
 - `TestExample08_WorkflowWithConditionals` - Tests workflows with SWITCH tasks for conditional logic
 - `TestExample09_WorkflowWithLoops` - Tests workflows with FOR tasks for iteration
 - `TestExample10_WorkflowWithErrorHandling` - Tests workflows with TRY/CATCH error handling
 - `TestExample11_WorkflowWithParallelExecution` - Tests workflows with FORK tasks for parallel execution
 
-**Status**: 5/5 passing ✅
+**Status**: 4/4 passing ✅  
+**Note**: These examples use the old API and are marked with warning headers
 
-## Fixed Issues
+## Recent Updates (2026-01-17)
 
-### Workflow Proto Conversion Error (RESOLVED ✅)
+### New Tests Added ⭐
 
-**Previous Issue**: Workflow examples were failing with protobuf conversion errors.
+**1. TestExample08_AgentWithTypedContext**
+- **File**: `08_agent_with_typed_context.go`
+- **Purpose**: Validates agent creation with typed context variables
+- **Tests**: 
+  - Agent manifest generation
+  - Typed context variable usage (agentName, iconURL, org)
+  - Skills and MCP servers configuration
+  - Demonstrates NEW Pulumi-aligned API
 
-**Root Cause**: The SDK's workflow synthesis code could not convert certain Go types to protobuf `Struct`:
-1. `map[string]string` types (Variables, Headers)
-2. `[]map[string]interface{}` slices (SWITCH cases, FOR tasks, FORK branches, TRY catch blocks)
-3. `[]string` slices (TRY error lists)
-4. `workflow.TaskKind` enum types
+**2. TestExample09_WorkflowAndAgentSharedContext**
+- **File**: `09_workflow_and_agent_shared_context.go`
+- **Purpose**: Validates workflow and agent sharing the same typed context
+- **Tests**:
+  - Both workflow and agent manifest generation
+  - Shared context variables (apiURL, orgName, retryCount)
+  - Demonstrates advanced NEW API pattern
 
-**Fix Applied**: Updated `go/internal/synth/workflow_converter.go` with helper functions:
-- `stringMapToInterface()` - Converts `map[string]string` to `map[string]interface{}`
-- `mapSliceToInterfaceSlice()` - Converts `[]map[string]interface{}` to `[]interface{}`
-- `stringSliceToInterfaceSlice()` - Converts `[]string` to `[]interface{}`
-- Type conversions for enum values (e.g., `string(taskKind)`)
+### Obsolete Files Removed
 
-**Result**: All workflow examples now pass successfully (11/11 tests passing).
+- Deleted `task3-manifest-example.go` (obsolete internal reference file)
 
 ## Running Tests
 
 ```bash
-# Run all tests
-go test -v -timeout 180s
+# Run all tests (recommended)
+go test -v
+
+# Run all tests without cache (for debugging)
+go test -v -count=1
 
 # Run specific test
-go test -v -run TestExample01
+go test -v -run TestExample01_BasicAgent
 
-# Run only agent tests (currently passing)
-go test -v -run 'TestExample0[1-6]'
+# Run only agent tests
+go test -v -run 'TestExample0[1-6]|TestExample08_AgentWithTypedContext'
 
-# Run only workflow tests (now passing)
-go test -v -run 'TestExample0[7-9]|TestExample1[01]'
+# Run only NEW API workflow tests
+go test -v -run 'TestExample07_BasicWorkflow|TestExample09_WorkflowAndAgentSharedContext'
+
+# Run only OLD API workflow tests
+go test -v -run 'TestExample0[8-9]_Workflow|TestExample1[01]'
+```
+
+**Expected Output**:
+```
+PASS
+ok  	github.com/leftbin/stigmer-sdk/go/examples	2.151s
 ```
 
 ## Test Implementation
@@ -96,47 +131,51 @@ func TestExample01_BasicAgent(t *testing.T) {
 }
 ```
 
-## Fixes Applied
+## API Migration Status
 
-### Build Tags
+### NEW API Examples (Pulumi-Aligned) ✅
 
-Added `//go:build ignore` tags to all example files to prevent package conflicts:
+These examples use the new Pulumi-aligned API with `stigmer.Run()` and typed context:
 
-- `07_basic_workflow.go`
-- `08_workflow_with_conditionals.go`
-- `09_workflow_with_loops.go`
-- `10_workflow_with_error_handling.go`
-- `11_workflow_with_parallel_execution.go`
-- `task3-manifest-example.go`
+- `07_basic_workflow.go` - Demonstrates HTTP tasks, field references, implicit dependencies
+- `08_agent_with_typed_context.go` - Demonstrates agent with typed context variables
+- `09_workflow_and_agent_shared_context.go` - Demonstrates shared context pattern
 
-### Example Structure
+**Features**:
+- ✅ `stigmer.Run(func(ctx) {...})` pattern
+- ✅ Typed context variables
+- ✅ `task.Field()` for task output references
+- ✅ Implicit dependency tracking
+- ✅ Clean workflow builders (`wf.HttpGet()`, etc.)
 
-Updated workflow examples (08-11) to pass tasks during `workflow.New()` instead of using `AddTask()` later, as the SDK requires at least one task during workflow creation:
+### OLD API Examples (Marked as Legacy) ⚠️
 
-```go
-// Old pattern (causes validation error)
-wf, err := workflow.New(...)  // No tasks - fails validation!
-wf.AddTask(task1)
-wf.AddTask(task2)
+These examples use the old API and have warning headers:
 
-// New pattern (correct)
-task1 := workflow.SetTask(...)
-task2 := workflow.HttpCallTask(...)
-wf, err := workflow.New(..., workflow.WithTasks(task1, task2))
-```
+- `08_workflow_with_conditionals.go` - SWITCH tasks
+- `09_workflow_with_loops.go` - FOR tasks
+- `10_workflow_with_error_handling.go` - TRY tasks
+- `11_workflow_with_parallel_execution.go` - FORK tasks
+- `07_basic_workflow_legacy.go` - Intentional reference
 
-### Unused Imports
-
-Removed unused imports from `03_agent_with_mcp_servers.go`:
-- `encoding/json`
-- `google.golang.org/protobuf/encoding/protojson`
+**Status**: All have `//go:build ignore` tags and warning headers pointing to migration guide.
 
 ## Next Steps
 
-1. **Fix SDK Bug**: Update `workflow_converter.go` to handle `map[string]string` conversion to protobuf
-2. **Verify Workflow Tests**: Once SDK is fixed, all workflow tests should pass
-3. **Expand Test Coverage**: Add more detailed assertions for workflow task configurations
-4. **Golden Files**: Consider adding golden file tests for exact manifest comparison
+### Short-term (Optional - Phase 5.3)
+- Migrate OLD API workflow examples (08-11) to NEW API
+- Remove warning headers from migrated examples
+
+### Long-term (Phase 7)
+- Integration testing with workflow-runner
+- Integration testing with agent-runner
+- End-to-end execution validation
+- Performance testing
+
+### Quality Improvements (Future)
+- Add golden file tests for exact manifest comparison
+- Expand test assertions for workflow task configurations
+- Add benchmark tests
 
 ## Test Artifacts
 

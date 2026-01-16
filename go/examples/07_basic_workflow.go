@@ -6,8 +6,8 @@ package main
 import (
 	"log"
 
-	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/environment"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
