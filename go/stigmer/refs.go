@@ -21,6 +21,11 @@ type Ref interface {
 
 	// IsSecret returns true if this reference contains sensitive data
 	IsSecret() bool
+
+	// ToValue returns the value for synthesis/serialization.
+	// This is used during workflow generation to inject context variables.
+	// Returns a JSON-compatible value (string, int, bool, map, slice, etc.)
+	ToValue() interface{}
 }
 
 // baseRef provides common functionality for all Ref implementations.
@@ -65,6 +70,12 @@ type StringRef struct {
 
 // Value returns the initial value of this string reference (used during synthesis).
 func (s *StringRef) Value() string {
+	return s.value
+}
+
+// ToValue implements Ref.ToValue() for synthesis/serialization.
+// Returns the string value as interface{} for JSON serialization.
+func (s *StringRef) ToValue() interface{} {
 	return s.value
 }
 
@@ -242,6 +253,12 @@ func (i *IntRef) Value() int {
 	return i.value
 }
 
+// ToValue implements Ref.ToValue() for synthesis/serialization.
+// Returns the integer value as interface{} for JSON serialization.
+func (i *IntRef) ToValue() interface{} {
+	return i.value
+}
+
 // Add creates a new IntRef that adds another integer to this one.
 // It generates a JQ expression for runtime addition.
 //
@@ -368,7 +385,14 @@ type BoolRef struct {
 }
 
 // Value returns the initial value of this boolean reference (used during synthesis).
+// Returns the boolean value as interface{} for JSON serialization.
 func (b *BoolRef) Value() bool {
+	return b.value
+}
+
+// ToValue implements Ref.ToValue() for synthesis/serialization.
+// Returns the boolean value as interface{} for JSON serialization.
+func (b *BoolRef) ToValue() interface{} {
 	return b.value
 }
 
@@ -480,6 +504,12 @@ type ObjectRef struct {
 
 // Value returns the initial value of this object reference (used during synthesis).
 func (o *ObjectRef) Value() map[string]interface{} {
+	return o.value
+}
+
+// ToValue implements Ref.ToValue() for synthesis/serialization.
+// Returns the object (map) value as interface{} for JSON serialization.
+func (o *ObjectRef) ToValue() interface{} {
 	return o.value
 }
 

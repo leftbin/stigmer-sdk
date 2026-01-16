@@ -25,7 +25,34 @@ import (
 //   - workflow.Task → workflowv1.WorkflowTask
 //
 // Returns an error if any nested conversion fails.
+//
+// Note: This version does not inject context variables. Use ToWorkflowManifestWithContext
+// if you need automatic context variable injection.
 func ToWorkflowManifest(workflowInterfaces ...interface{}) (*workflowv1.WorkflowManifest, error) {
+	return ToWorkflowManifestWithContext(nil, workflowInterfaces...)
+}
+
+// ToWorkflowManifestWithContext converts SDK Workflows to a WorkflowManifest proto message
+// with automatic context variable injection.
+//
+// When contextVars is provided, a SET task is automatically injected as the first task
+// in each workflow to initialize the workflow context with the provided variables.
+//
+// This implements the Pulumi-style pattern where context variables defined via
+// ctx.SetString(), ctx.SetInt(), etc. are automatically available in the workflow runtime.
+//
+// Example:
+//   ctx.SetString("apiURL", "https://api.example.com")
+//   ctx.SetInt("retries", 3)
+//
+// Will generate a SET task:
+//   - name: __stigmer_init_context
+//     kind: SET
+//     task_config:
+//       variables:
+//         apiURL: "https://api.example.com"
+//         retries: 3
+func ToWorkflowManifestWithContext(contextVars map[string]interface{}, workflowInterfaces ...interface{}) (*workflowv1.WorkflowManifest, error) {
 	if len(workflowInterfaces) == 0 {
 		return nil, fmt.Errorf("at least one workflow is required")
 	}
@@ -51,8 +78,8 @@ func ToWorkflowManifest(workflowInterfaces ...interface{}) (*workflowv1.Workflow
 			return nil, fmt.Errorf("workflow[%d]: invalid type %T, expected *workflow.Workflow", wfIdx, workflowInterface)
 		}
 
-		// Convert to proto
-		protoWorkflow, err := workflowToProto(wf)
+		// Convert to proto with context variable injection
+		protoWorkflow, err := workflowToProtoWithContext(wf, contextVars)
 		if err != nil {
 			return nil, fmt.Errorf("workflow[%d] %s: %w", wfIdx, wf.Document.Name, err)
 		}
@@ -65,7 +92,14 @@ func ToWorkflowManifest(workflowInterfaces ...interface{}) (*workflowv1.Workflow
 }
 
 // workflowToProto converts a workflow.Workflow to a workflowv1.Workflow proto.
+// This version does not inject context variables.
 func workflowToProto(wf *workflow.Workflow) (*workflowv1.Workflow, error) {
+	return workflowToProtoWithContext(wf, nil)
+}
+
+// workflowToProtoWithContext converts a workflow.Workflow to a workflowv1.Workflow proto
+// with automatic context variable injection.
+func workflowToProtoWithContext(wf *workflow.Workflow, contextVars map[string]interface{}) (*workflowv1.Workflow, error) {
 	// Create workflow proto
 	protoWorkflow := &workflowv1.Workflow{
 		ApiVersion: "agentic.stigmer.ai/v1",
@@ -75,8 +109,8 @@ func workflowToProto(wf *workflow.Workflow) (*workflowv1.Workflow, error) {
 	// Convert metadata (placeholder - would need actual metadata proto structure)
 	// For now, we'll focus on the spec
 
-	// Convert spec
-	spec, err := workflowSpecToProto(wf)
+	// Convert spec with context variable injection
+	spec, err := workflowSpecToProtoWithContext(wf, contextVars)
 	if err != nil {
 		return nil, fmt.Errorf("converting spec: %w", err)
 	}
@@ -86,7 +120,19 @@ func workflowToProto(wf *workflow.Workflow) (*workflowv1.Workflow, error) {
 }
 
 // workflowSpecToProto converts workflow spec to proto.
+// This version does not inject context variables.
 func workflowSpecToProto(wf *workflow.Workflow) (*workflowv1.WorkflowSpec, error) {
+	return workflowSpecToProtoWithContext(wf, nil)
+}
+
+// workflowSpecToProtoWithContext converts workflow spec to proto with context variable injection.
+//
+// If contextVars is provided and non-empty, a SET task named "__stigmer_init_context" is
+// automatically injected as the first task to initialize the workflow context.
+//
+// This follows the Pulumi pattern where SDK context variables are automatically available
+// at runtime without manual wiring.
+func workflowSpecToProtoWithContext(wf *workflow.Workflow, contextVars map[string]interface{}) (*workflowv1.WorkflowSpec, error) {
 	spec := &workflowv1.WorkflowSpec{
 		Description: wf.Description,
 		Document: &workflowv1.WorkflowDocument{
@@ -99,7 +145,16 @@ func workflowSpecToProto(wf *workflow.Workflow) (*workflowv1.WorkflowSpec, error
 		Tasks: []*workflowv1.WorkflowTask{},
 	}
 
-	// Convert tasks
+	// Inject context initialization task if context variables exist
+	if len(contextVars) > 0 {
+		contextInitTask, err := createContextInitTask(contextVars)
+		if err != nil {
+			return nil, fmt.Errorf("creating context init task: %w", err)
+		}
+		spec.Tasks = append(spec.Tasks, contextInitTask)
+	}
+
+	// Convert user-defined tasks
 	for i, task := range wf.Tasks {
 		protoTask, err := taskToProto(task)
 		if err != nil {
@@ -114,6 +169,71 @@ func workflowSpecToProto(wf *workflow.Workflow) (*workflowv1.WorkflowSpec, error
 	// TODO: Implement environmentVariablesToEnvSpec when proto structure is finalized
 
 	return spec, nil
+}
+
+// createContextInitTask creates a SET task that initializes workflow context variables.
+//
+// This task is automatically injected as the first task in workflows when context variables
+// are defined via ctx.SetString(), ctx.SetInt(), etc.
+//
+// The task sets all context variables to their initial values, making them available
+// for use in subsequent tasks via JQ expressions like "${ $context.variableName }".
+//
+// Task structure:
+//   - name: __stigmer_init_context
+//   - kind: SET
+//   - task_config:
+//       variables:
+//         variableName1: value1
+//         variableName2: value2
+//
+// Note: The contextVars map values must implement the Ref interface with ToValue() method.
+func createContextInitTask(contextVars map[string]interface{}) (*workflowv1.WorkflowTask, error) {
+	// Import the Ref interface to access ToValue()
+	// We need to import the parent package, but to avoid circular imports,
+	// we'll use type assertion with interface{} and call ToValue via reflection
+	// Actually, we can't import stigmer package here due to circular dependency
+	// So we need to pass already-serialized values from the context
+
+	// Build variables map for the SET task
+	variables := make(map[string]interface{}, len(contextVars))
+	for name, refInterface := range contextVars {
+		// The contextVars map contains Ref interface values
+		// We need to call ToValue() on each one
+		// Use type assertion to access the ToValue() method
+		type valueExtractor interface {
+			ToValue() interface{}
+		}
+		
+		if ref, ok := refInterface.(valueExtractor); ok {
+			variables[name] = ref.ToValue()
+		} else {
+			// Fallback: use the value as-is (shouldn't happen if called correctly)
+			variables[name] = refInterface
+		}
+	}
+
+	// Create SET task config
+	setConfig := map[string]interface{}{
+		"variables": variables,
+	}
+
+	// Convert to protobuf Struct
+	taskConfigStruct, err := structpb.NewStruct(setConfig)
+	if err != nil {
+		return nil, fmt.Errorf("creating task config struct: %w", err)
+	}
+
+	// Build the context init task
+	task := &workflowv1.WorkflowTask{
+		Name:       "__stigmer_init_context",
+		Kind:       apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_SET,
+		TaskConfig: taskConfigStruct,
+		// No export needed - this task just sets variables
+		// No flow control - tasks will execute sequentially
+	}
+
+	return task, nil
 }
 
 // taskToProto converts a workflow.Task to a workflowv1.WorkflowTask proto.

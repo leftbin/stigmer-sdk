@@ -599,3 +599,267 @@ func TestSecretPropagation(t *testing.T) {
 	// This is a design decision - transformed values might not need to be secret
 	t.Logf("Header secret status: %v", header.IsSecret())
 }
+
+// =============================================================================
+// ToValue() Tests - Context Variable Injection Support
+// =============================================================================
+
+func TestStringRef_ToValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref      *StringRef
+		expected interface{}
+	}{
+		{
+			name: "simple string value",
+			ref: &StringRef{
+				baseRef: baseRef{name: "apiURL"},
+				value:   "https://api.example.com",
+			},
+			expected: "https://api.example.com",
+		},
+		{
+			name: "empty string value",
+			ref: &StringRef{
+				baseRef: baseRef{name: "empty"},
+				value:   "",
+			},
+			expected: "",
+		},
+		{
+			name: "secret string value",
+			ref: &StringRef{
+				baseRef: baseRef{name: "apiKey", isSecret: true},
+				value:   "secret-123",
+			},
+			expected: "secret-123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ref.ToValue()
+			if got != tt.expected {
+				t.Errorf("ToValue() = %v, want %v", got, tt.expected)
+			}
+			
+			// Verify type is string
+			if _, ok := got.(string); !ok {
+				t.Errorf("ToValue() returned %T, want string", got)
+			}
+		})
+	}
+}
+
+func TestIntRef_ToValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref      *IntRef
+		expected interface{}
+	}{
+		{
+			name: "positive integer",
+			ref: &IntRef{
+				baseRef: baseRef{name: "retries"},
+				value:   3,
+			},
+			expected: 3,
+		},
+		{
+			name: "zero value",
+			ref: &IntRef{
+				baseRef: baseRef{name: "zero"},
+				value:   0,
+			},
+			expected: 0,
+		},
+		{
+			name: "negative integer",
+			ref: &IntRef{
+				baseRef: baseRef{name: "offset"},
+				value:   -10,
+			},
+			expected: -10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ref.ToValue()
+			if got != tt.expected {
+				t.Errorf("ToValue() = %v, want %v", got, tt.expected)
+			}
+			
+			// Verify type is int
+			if _, ok := got.(int); !ok {
+				t.Errorf("ToValue() returned %T, want int", got)
+			}
+		})
+	}
+}
+
+func TestBoolRef_ToValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref      *BoolRef
+		expected interface{}
+	}{
+		{
+			name: "true value",
+			ref: &BoolRef{
+				baseRef: baseRef{name: "isProd"},
+				value:   true,
+			},
+			expected: true,
+		},
+		{
+			name: "false value",
+			ref: &BoolRef{
+				baseRef: baseRef{name: "isDebug"},
+				value:   false,
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ref.ToValue()
+			if got != tt.expected {
+				t.Errorf("ToValue() = %v, want %v", got, tt.expected)
+			}
+			
+			// Verify type is bool
+			if _, ok := got.(bool); !ok {
+				t.Errorf("ToValue() returned %T, want bool", got)
+			}
+		})
+	}
+}
+
+func TestObjectRef_ToValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref      *ObjectRef
+		validate func(t *testing.T, got interface{})
+	}{
+		{
+			name: "simple object",
+			ref: &ObjectRef{
+				baseRef: baseRef{name: "config"},
+				value: map[string]interface{}{
+					"host": "localhost",
+					"port": 5432,
+				},
+			},
+			validate: func(t *testing.T, got interface{}) {
+				m, ok := got.(map[string]interface{})
+				if !ok {
+					t.Fatalf("ToValue() returned %T, want map[string]interface{}", got)
+				}
+				if m["host"] != "localhost" {
+					t.Errorf("host = %v, want localhost", m["host"])
+				}
+				if m["port"] != 5432 {
+					t.Errorf("port = %v, want 5432", m["port"])
+				}
+			},
+		},
+		{
+			name: "nested object",
+			ref: &ObjectRef{
+				baseRef: baseRef{name: "config"},
+				value: map[string]interface{}{
+					"database": map[string]interface{}{
+						"host": "localhost",
+						"port": 5432,
+					},
+					"cache": map[string]interface{}{
+						"enabled": true,
+					},
+				},
+			},
+			validate: func(t *testing.T, got interface{}) {
+				m, ok := got.(map[string]interface{})
+				if !ok {
+					t.Fatalf("ToValue() returned %T, want map[string]interface{}", got)
+				}
+				
+				db, ok := m["database"].(map[string]interface{})
+				if !ok {
+					t.Fatalf("database field should be map[string]interface{}")
+				}
+				if db["host"] != "localhost" {
+					t.Errorf("database.host = %v, want localhost", db["host"])
+				}
+				
+				cache, ok := m["cache"].(map[string]interface{})
+				if !ok {
+					t.Fatalf("cache field should be map[string]interface{}")
+				}
+				if cache["enabled"] != true {
+					t.Errorf("cache.enabled = %v, want true", cache["enabled"])
+				}
+			},
+		},
+		{
+			name: "empty object",
+			ref: &ObjectRef{
+				baseRef: baseRef{name: "empty"},
+				value:   map[string]interface{}{},
+			},
+			validate: func(t *testing.T, got interface{}) {
+				m, ok := got.(map[string]interface{})
+				if !ok {
+					t.Fatalf("ToValue() returned %T, want map[string]interface{}", got)
+				}
+				if len(m) != 0 {
+					t.Errorf("expected empty map, got %v", m)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ref.ToValue()
+			tt.validate(t, got)
+		})
+	}
+}
+
+func TestToValue_RefInterface(t *testing.T) {
+	// Test that ToValue() works via the Ref interface
+	var refs []Ref
+	
+	refs = append(refs, &StringRef{
+		baseRef: baseRef{name: "str"},
+		value:   "hello",
+	})
+	
+	refs = append(refs, &IntRef{
+		baseRef: baseRef{name: "num"},
+		value:   42,
+	})
+	
+	refs = append(refs, &BoolRef{
+		baseRef: baseRef{name: "flag"},
+		value:   true,
+	})
+	
+	refs = append(refs, &ObjectRef{
+		baseRef: baseRef{name: "obj"},
+		value: map[string]interface{}{
+			"key": "value",
+		},
+	})
+	
+	// Verify we can call ToValue() through the interface
+	for i, ref := range refs {
+		value := ref.ToValue()
+		if value == nil {
+			t.Errorf("refs[%d].ToValue() returned nil", i)
+		}
+		t.Logf("refs[%d] (%s): ToValue() = %v (type: %T)", i, ref.Name(), value, value)
+	}
+}

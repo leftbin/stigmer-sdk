@@ -360,8 +360,14 @@ func (c *Context) synthesizeAgents(outputDir string, agentInterfaces []interface
 
 // synthesizeWorkflows converts workflows to protobuf and writes to disk
 func (c *Context) synthesizeWorkflows(outputDir string, workflowInterfaces []interface{}) error {
-	// Convert workflows to manifest proto
-	manifest, err := synth.ToWorkflowManifest(workflowInterfaces...)
+	// Convert context variables (map[string]Ref) to map[string]interface{} for synthesis
+	contextVars := make(map[string]interface{}, len(c.variables))
+	for name, ref := range c.variables {
+		contextVars[name] = ref
+	}
+
+	// Convert workflows to manifest proto, passing context variables for injection
+	manifest, err := synth.ToWorkflowManifestWithContext(contextVars, workflowInterfaces...)
 	if err != nil {
 		return fmt.Errorf("failed to convert workflows to manifest: %w", err)
 	}
