@@ -1043,11 +1043,17 @@ func WithWorkflowInput(input map[string]any) RunTaskOption {
 // Variable Interpolation Helpers
 // ============================================================================
 
-// VarRef creates a reference to a workflow variable.
-// This is a high-level helper that replaces manual "${varName}" syntax.
-// Example: WithURI(VarRef("apiURL") + "/data") instead of WithURI("${apiURL}/data")
+// VarRef creates a reference to a workflow variable from context.
+// Variables set via SetTask are stored in the workflow context and must be
+// referenced with dot notation in Serverless Workflow DSL.
+//
+// Example: WithURI(Interpolate(VarRef("apiURL"), "/data"))
+// Generates: ${ .apiURL + "/data" }
+//
+// Note: This is for variables set in the workflow (via set: tasks).
+// For environment variables, use a different helper (future).
 func VarRef(varName string) string {
-	return fmt.Sprintf("${%s}", varName)
+	return fmt.Sprintf("${.%s}", varName)
 }
 
 // FieldRef creates a reference to a field in the current context.

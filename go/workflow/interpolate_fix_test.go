@@ -14,17 +14,17 @@ func TestInterpolateFix(t *testing.T) {
 		{
 			name:     "variable with path",
 			input:    []string{VarRef("apiURL"), "/posts/1"},
-			expected: "${ apiURL + \"/posts/1\" }",
+			expected: "${ .apiURL + \"/posts/1\" }",
 		},
 		{
 			name:     "bearer token",
 			input:    []string{"Bearer ", VarRef("token")},
-			expected: "${ \"Bearer \" + token }",
+			expected: "${ \"Bearer \" + .token }",
 		},
 		{
 			name:     "complex URL",
 			input:    []string{"https://", VarRef("domain"), "/api/", FieldRef("version")},
-			expected: "${ \"https://\" + domain + \"/api/\" + .version }",
+			expected: "${ \"https://\" + .domain + \"/api/\" + .version }",
 		},
 		{
 			name:     "plain string (no expressions)",
@@ -34,7 +34,7 @@ func TestInterpolateFix(t *testing.T) {
 		{
 			name:     "only expression",
 			input:    []string{VarRef("fullURL")},
-			expected: "${fullURL}",
+			expected: "${.fullURL}",
 		},
 	}
 
@@ -54,7 +54,7 @@ func TestInterpolateRealWorldExample(t *testing.T) {
 	// workflow.WithURI(workflow.Interpolate(workflow.VarRef("apiURL"), "/posts/1"))
 	
 	uri := Interpolate(VarRef("apiURL"), "/posts/1")
-	expected := "${ apiURL + \"/posts/1\" }"
+	expected := "${ .apiURL + \"/posts/1\" }"
 	
 	if uri != expected {
 		t.Errorf("Real-world example failed: got %q, want %q", uri, expected)
