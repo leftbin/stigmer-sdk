@@ -17,6 +17,67 @@ This log captures all learnings, discoveries, and solutions from implementing an
 
 ---
 
+## API Design & Simplification
+
+**Topic Coverage**: API naming conventions, constructor patterns, Pulumi alignment, developer experience
+
+### 2026-01-17 - Single Pattern API Cleanup (BREAKING CHANGE)
+
+**Problem**: SDK had two ways to create agents/workflows causing confusion:
+- `agent.New()` (standalone, used global registry)
+- `agent.NewWithContext(ctx, ...)` (context-aware, recommended)
+
+Developers didn't know which to use. The "WithContext" suffix was verbose and un-Pulumi-like.
+
+**Root Cause**:
+- Historical evolution: Started with standalone `New()`, added context support later
+- Kept both for backward compatibility
+- "WithContext" suffix made API feel second-class
+- Pulumi uses `New(ctx, ...)` not `NewWithContext(ctx, ...)`
+
+**Solution**: Removed all legacy patterns, kept only clean context-first API
+
+**Changes Made:**
+1. **Deleted legacy synthesis code:**
+   - `stigmer.Complete()` function
+   - `internal/registry/` package (global registry)
+   - `internal/synth/synth.go` (auto-synthesis)
+   - All tests using old patterns
+
+2. **Removed standalone constructors:**
+   - Deleted `agent.New()` without context
+   - Deleted `workflow.New()` without context
+
+3. **Simplified naming (removed "WithContext" suffix):**
+   - `agent.NewWithContext(ctx, ...)` → `agent.New(ctx, ...)`
+   - `workflow.NewWithContext(ctx, ...)` → `workflow.New(ctx, ...)`
+
+4. **Updated all examples (13 total):**
+   - All use `stigmer.Run()` pattern
+   - All use `agent.New(ctx, ...)` and `workflow.New(ctx, ...)`
+   - Removed legacy workflow example
+
+**Result:**
+```go
+// Clean, Pulumi-aligned API
+stigmer.Run(func(ctx *stigmer.Context) error {
+    agent.New(ctx, ...)      // Like s3.NewBucket(ctx, ...)
+    workflow.New(ctx, ...)   // Consistent pattern
+    return nil
+})
+```
+
+**Benefits:**
+- ✅ Single way to do things (no confusion)
+- ✅ Pulumi-familiar naming (context-first, no suffix)
+- ✅ Old code won't compile (breaking change forces migration)
+- ✅ Cleaner API surface (~1000+ lines removed)
+- ✅ Better developer experience
+
+**Key Learning**: When adding context support to existing API, **replace** the old API entirely rather than adding a "WithContext" variant. The suffix makes the new API feel like an afterthought. Pulumi's pattern (`New(ctx, ...)`) is the gold standard.
+
+---
+
 ## Typed Context System (NEW MAJOR FEATURE)
 
 **Topic Coverage**: Pulumi-style context management, typed references, compile-time safety, IDE support, shared context between workflows and agents
