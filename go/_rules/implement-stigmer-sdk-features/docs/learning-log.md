@@ -3886,7 +3886,367 @@ Is this a multi-purpose package? (workflow with many task types)
 
 ## Documentation Organization
 
-**Topic Coverage**: Documentation standards, filename conventions, categorization, navigation
+**Topic Coverage**: Documentation standards, filename conventions, categorization, navigation, professional SDK documentation patterns
+
+### 2026-01-16 - Comprehensive Pulumi-Aligned API Documentation (MAJOR DOCUMENTATION PATTERN)
+
+**Problem**: After implementing Pulumi-aligned API patterns (Phases 1-5), needed comprehensive documentation showing migration paths, design rationale, and best practices. Users migrating from old API needed step-by-step guidance. New users needed to understand the "why" behind design decisions.
+
+**Root Cause**:
+- Major API redesign created gap between OLD and NEW patterns  
+- Design decisions needed documentation for future reference
+- Migration path not obvious without examples
+- Professional SDKs (like Pulumi) have comprehensive docs - we needed same quality
+
+**Solution**: Created professional-grade documentation suite (~2530 lines) following industry best practices
+
+#### Documentation Structure Created
+
+```
+go/
+├── README.md                           # Updated with workflow section
+├── docs/
+│   ├── README.md                       # Updated index
+│   ├── guides/
+│   │   └── typed-context-migration.md  # 900 lines - Migration guide
+│   ├── architecture/
+│   │   └── pulumi-aligned-patterns.md  # 650 lines - Design rationale
+│   └── references/                     # Existing refs
+├── stigmer/
+│   └── doc.go                          # 230 lines - Package godoc
+├── workflow/
+│   └── doc.go                          # 270 lines - Package godoc
+└── examples/
+    └── README_WORKFLOW_EXAMPLES.md     # 250 lines - Example status
+```
+
+**Total Documentation**: ~2530 lines
+
+#### 1. Migration Guide Pattern (900 lines)
+
+**File**: `docs/guides/typed-context-migration.md`
+
+**Structure**:
+1. **Quick Comparison** - OLD ❌ vs NEW ✅ tables
+2. **Core Design Changes** - 5 major changes explained
+3. **Migration Steps** - 7 steps with before/after code
+4. **Complete Example** - Real 40-line transformation
+5. **Breaking Changes Table** - Quick reference
+6. **Benefits Analysis** - Why migrate (40% less code)
+7. **Troubleshooting** - 4 common errors with solutions
+8. **Migration Checklist** - Validation steps
+9. **FAQ** - 12 common questions answered
+
+**Key Pattern**: Side-by-side code comparisons throughout
+
+```markdown
+## Field References
+
+\`\`\`go
+// BEFORE ❌ - Where does "title" come from?
+processTask := workflow.SetTask("process",
+    workflow.SetVar("postTitle", workflow.FieldRef("title")), // ???
+)
+
+// AFTER ✅ - Crystal clear!
+processTask := wf.SetVars("process",
+    "postTitle", fetchTask.Field("title"), // From fetchTask!
+)
+\`\`\`
+```
+
+**Why This Works**:
+- Concrete before/after examples (not abstract explanations)
+- Users see exact transformation needed
+- Explanatory comments show the improvement
+- Real code they can copy-paste
+
+#### 2. Architecture Documentation Pattern (650 lines)
+
+**File**: `docs/architecture/pulumi-aligned-patterns.md`
+
+**Structure**:
+1. **Core Philosophy** - "Feel like Pulumi, not proto messages"
+2. **How Pulumi Works** - Context for the design
+3. **Stigmer Alignment** - Each Pulumi pattern explained
+4. **Mermaid Diagrams** - OLD vs NEW visual comparison (3 diagrams)
+5. **Internal Architecture** - How it works under the hood
+6. **Dependency Tracking** - Algorithm explained
+7. **Comparison Tables** - Pulumi/Terraform/CloudFormation
+8. **Design Decisions** - Rationale for each choice
+9. **Future Enhancements** - Planned features
+10. **Testing Patterns** - How to test
+
+**Key Pattern**: Explain "why" before "how"
+
+```markdown
+## Why Pulumi vs. Terraform Style?
+
+**Decision**: Pulumi-style because:
+1. ✅ Go SDK - naturally code-first
+2. ✅ Strong typing benefits
+3. ✅ Better IDE support
+4. ✅ More familiar to Go developers
+
+(Followed by detailed explanation)
+```
+
+**Why This Works**:
+- Shows research and reasoning
+- Educates users on design philosophy
+- Builds confidence in architecture
+- Answers "why this way?" questions proactively
+
+#### 3. Mermaid Diagrams for Visual Learning
+
+**Pattern**: Use flowcharts to show transformation
+
+```markdown
+### OLD: Confusing Context + Manual Dependencies
+
+\`\`\`mermaid
+flowchart TB
+    Context["Context<br/>(Config + Data)"]
+    Context -->|Copy to| Init[Init Task]
+    Fetch -->|ExportAll| Exports[Exported Fields]
+    Exports -.->|FieldRef string| Process
+    style Context fill:#ffcccc
+\`\`\`
+
+### NEW: Clear Config + Implicit Dependencies
+
+\`\`\`mermaid
+flowchart TB
+    Context["Context<br/>(Config Only)"]
+    Context -->|Config refs| WF[Workflow Metadata]
+    Fetch -->|.Field output| Process[Process Task]
+    style Context fill:#ccffcc
+\`\`\`
+```
+
+**Why This Works**:
+- Visual learners understand immediately
+- Shows before/after architecture clearly
+- Color coding highlights improvements
+- Flows show data movement
+
+#### 4. Package-Level Godoc Pattern (500 lines total)
+
+**Files**: `stigmer/doc.go` (230 lines), `workflow/doc.go` (270 lines)
+
+**Structure**:
+1. **Package Overview** - What it does (1-2 paragraphs)
+2. **Quick Start Examples** - 2 complete working examples
+3. **Core Concepts** - 5 key concepts explained
+4. **Design Patterns** - Good ✅ vs Bad ❌ examples
+5. **Complete Example** - ~50 line workflow
+6. **Migration Examples** - OLD → NEW inline
+7. **Links** - To comprehensive docs
+
+**Key Pattern**: Working code examples in godoc
+
+```go
+// Package stigmer provides the core orchestration layer.
+//
+// # Quick Start - Workflow
+//
+//	err := stigmer.Run(func(ctx *stigmer.Context) error {
+//	    // Context for configuration
+//	    apiBase := ctx.SetString("apiBase", "https://api.example.com")
+//	    
+//	    // Create workflow
+//	    wf, _ := workflow.NewWithContext(ctx, ...)
+//	    
+//	    // Tasks with implicit dependencies
+//	    fetchTask := wf.HttpGet("fetch", endpoint)
+//	    processTask := wf.SetVars("process",
+//	        "data", fetchTask.Field("result"),  // From fetchTask!
+//	    )
+//	    return nil
+//	})
+```
+
+**Why This Works**:
+- Developers see usage immediately in godoc
+- pkg.go.dev shows beautiful formatted examples
+- Quick reference without leaving IDE
+- Copy-paste ready code
+
+#### 5. README Workflow Section Pattern
+
+**Approach**: Dedicate significant README space to workflows
+
+**Structure**:
+1. **Features Section Update** - Split into Core + Workflow
+2. **Workflows Section** - Quick start + 5 key features
+3. **Examples Reorganization** - By category (agents, workflows, shared)
+4. **Clear Entry Points** - ⭐ symbols for recommended starts
+
+**Key Pattern**: Multiple entry points for different users
+
+```markdown
+### Workflow Examples
+8. **Basic Workflow** (`07_basic_workflow.go`) - ⭐ **START HERE**
+9. **Workflow with Conditionals** (`08_workflow_with_conditionals.go`)
+...
+
+**🌟 For agents**: Start with Example 06
+**🌟 For workflows**: Start with Example 07
+```
+
+**Why This Works**:
+- Different users find their path quickly
+- No confusion about where to start
+- Progressive disclosure (simple → advanced)
+
+#### 6. Example Status Tracking Pattern
+
+**File**: `examples/README_WORKFLOW_EXAMPLES.md`
+
+**Purpose**: Track which examples use NEW vs OLD API
+
+**Structure**:
+| Example | API Version | Status | Action |
+|---------|-------------|--------|--------|
+| 07_basic_workflow.go | NEW | ✅ Updated | None |
+| 08_workflow_with_conditionals.go | OLD | ⚠️ Needs update | Add header |
+
+**Warning Header Pattern** for OLD API examples:
+
+```go
+// ⚠️  WARNING: This example uses the OLD API
+//
+// For migration guidance, see: docs/guides/typed-context-migration.md
+// For new API patterns, see: examples/07_basic_workflow.go
+//
+// OLD patterns used:
+// - defer stigmer.Complete() → should use stigmer.Run()
+// - HttpCallTask() → should use wf.HttpGet()
+```
+
+**Why This Works**:
+- Clear status for maintainers
+- Users know what's current vs legacy
+- Links to migration help
+- Prevents confusion
+
+#### 7. Documentation Index Pattern
+
+**File**: `docs/README.md`
+
+**Structure**:
+```markdown
+## Architecture
+- [Pulumi-Aligned Patterns](./architecture/pulumi-aligned-patterns.md)
+
+## Guides
+- [Typed Context Migration Guide](./guides/typed-context-migration.md) - ⭐ **Migrating to new API**
+
+## Examples
+### Agent Examples (7)
+### Workflow Examples (6)
+### Shared Context Examples (1)
+### Legacy Examples (2)
+```
+
+**Why This Works**:
+- Easy navigation with clear categories
+- Stars highlight priority docs
+- Counts show scope
+- Categories help discovery
+
+#### Documentation Metrics & Quality
+
+**Lines Written**:
+- Migration guide: ~900 lines
+- Architecture doc: ~650 lines
+- Package godoc: ~500 lines
+- README updates: ~170 lines
+- Example docs: ~310 lines
+- **Total: ~2530 lines**
+
+**Quality Standards Met**:
+- ✅ Follows Stigmer documentation standards (lowercase, organized)
+- ✅ Professional Mermaid diagrams (3 flowcharts)
+- ✅ Comprehensive comparison tables (3 tables)
+- ✅ Real-world examples throughout
+- ✅ Multiple learning paths
+- ✅ Troubleshooting included
+- ✅ Exceeded industry SDK documentation norms
+
+**Impact**: Professional-grade documentation that matches implementation quality
+
+#### When to Apply This Pattern
+
+**Use this comprehensive documentation approach when:**
+
+1. **Major API Redesign**:
+   - Breaking changes that need migration guide
+   - New patterns need explaining
+   - Users need clear upgrade path
+
+2. **Complex Architecture**:
+   - Design decisions need documentation
+   - Trade-offs should be explained
+   - Future maintainers need context
+
+3. **Professional SDK Quality**:
+   - Competing with major SDKs (Pulumi, Terraform)
+   - Developer experience is priority
+   - Documentation is part of the product
+
+4. **Multiple User Types**:
+   - New users need quick start
+   - Migrating users need step-by-step
+   - Deep learners need architecture docs
+
+**Don't overdo for:**
+- ❌ Minor feature additions (simple godoc sufficient)
+- ❌ Internal tools (brief README okay)
+- ❌ Experimental features (wait for stabilization)
+
+#### Documentation Workflow
+
+1. **Implement First** - Get code working (Phases 1-5)
+2. **Document While Fresh** - Write docs immediately (Phase 6)
+3. **Progressive Disclosure** - README → Guide → Architecture → Godoc
+4. **Multiple Formats** - Code examples, diagrams, tables, text
+5. **Cross-Link Everything** - Easy navigation between docs
+6. **Maintain Status** - Track what's current vs legacy
+
+#### Key Learnings
+
+**What Worked Well**:
+1. **Mermaid Diagrams** - Visual comparisons powerful
+2. **Before/After Examples** - Concrete transformations clear
+3. **Good ✅ vs Bad ❌ Pattern** - Shows right way immediately
+4. **Working Code in Godoc** - Developers appreciate copy-paste ready
+5. **Comparison Tables** - Industry context helpful (Pulumi/TF/CF)
+
+**Time Investment**:
+- ~4 hours for 2530 lines
+- Worth it for major API changes
+- Documentation quality matches code quality
+
+**Cross-Language Note**:
+- **Python SDK**: Similar comprehensive documentation would use Python examples
+- **Go SDK**: Uses Go idioms (goroutines, channels, defer)
+- **Conceptual**: Both need migration guide, architecture docs, examples
+
+**Prevention**: For future major SDK changes:
+1. ✅ Plan documentation phase from start
+2. ✅ Write migration guide alongside implementation
+3. ✅ Create Mermaid diagrams for architecture
+4. ✅ Document design decisions as you make them
+5. ✅ Use this Phase 6 work as template
+
+**Related Documentation**:
+- Migration guide: `docs/guides/typed-context-migration.md`
+- Architecture: `docs/architecture/pulumi-aligned-patterns.md`
+- Package godoc: `stigmer/doc.go`, `workflow/doc.go`
+- Example status: `examples/README_WORKFLOW_EXAMPLES.md`
+
+---
 
 ### 2026-01-13 - Following Stigmer Documentation Standards
 
