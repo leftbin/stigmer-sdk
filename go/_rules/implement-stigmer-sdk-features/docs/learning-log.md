@@ -134,6 +134,326 @@ Interpolate(VarRef("apiURL"), "/posts/1")
 
 ---
 
+### 2026-01-16 - Typed Context System: Dual-Mode Expression Generation
+
+**Problem**: How to generate correct JQ expressions for both simple variable references (`$context.var`) and computed expressions (`$context.var + "/path"`)?
+
+**Root Cause**:
+- Simple references: Just need to wrap variable name with `${ $context.name }`
+- Computed expressions: Already have full expression, wrapping again creates `${ ${ $context.var } + ... }` (double-wrapping)
+- Initial approach tried to use `Expression()` method recursively, causing double-wrapping bug
+- Needed way to distinguish between simple vs computed references
+
+**Solution**: Implemented dual-mode expression generation with `isComputed` flag
+
+**Implementation**:
+```go
+// baseRef structure
+type baseRef struct {
+    name          string
+    isSecret      bool
+    isComputed    bool   // NEW: Distinguishes simple vs computed
+    rawExpression string // NEW: Stores expression without ${ } wrapper
+}
+
+func (r *baseRef) Expression() string {
+    if r.isComputed {
+        return fmt.Sprintf("${ %s }", r.rawExpression)  // Wrap raw expression
+    }
+    return fmt.Sprintf("${ $context.%s }", r.name)  // Wrap variable name
+}
+
+// Simple reference (isComputed = false)
+apiURL := &StringRef{
+    baseRef: baseRef{name: "apiURL", isComputed: false},
+    value: "https://api.example.com",
+}
+apiURL.Expression()  // "${ $context.apiURL }"
+
+// Computed expression (isComputed = true)
+func (s *StringRef) Append(suffix string) *StringRef {
+    var expr string
+    if s.isComputed {
+        expr = fmt.Sprintf(`(%s + "%s")`, s.rawExpression, suffix)
+    } else {
+        expr = fmt.Sprintf(`($context.%s + "%s")`, s.name, suffix)
+    }
+    return &StringRef{
+        baseRef: baseRef{
+            isComputed:    true,  // Mark as computed
+            rawExpression: expr,  // Store raw expression
+        },
+    }
+}
+
+endpoint := apiURL.Append("/users")
+endpoint.Expression()  // "${ ($context.apiURL + "/users") }"  ✅ Correct
+```
+
+**Prevention**:
+- Always set `isComputed = true` for operations that create new expressions
+- Store raw expression in `rawExpression` field (without `${ }` wrapper)
+- Let `Expression()` method handle wrapping based on `isComputed` flag
+- Never recursively call `Expression()` when building computed expressions
+
+**Testing**: 
+- 32 tests for all Ref type operations
+- Expression generation tests validating exact format
+- Complex expression chaining tests (concat + upper + prepend)
+
+**Impact**: Enables type-safe expression building with Pulumi-style API. Users get compile-time checking and IDE autocomplete for variable references.
+
+**Cross-Language Note**:
+- **Python approach**: Might use f-strings or string templates
+- **Go approach**: Uses dual-mode flag to prevent double-wrapping
+- **Conceptual similarity**: Both need to distinguish simple refs from computed expressions
+
+---
+
+### 2026-01-16 - Typed Context System: Thread-Safe Context Pattern
+
+**Problem**: Context object manages shared state (variables, workflows, agents) that might be accessed concurrently.
+
+**Root Cause**:
+- Context stores maps and slices that aren't inherently thread-safe
+- Even if concurrency unlikely now, future SDK features might introduce it
+- Better to be safe from the start than debug race conditions later
+- Go race detector would catch this in testing
+
+**Solution**: Implemented thread-safe Context with sync.RWMutex
+
+**Implementation**:
+```go
+type Context struct {
+    variables   map[string]Ref
+    workflows   []*workflow.Workflow
+    agents      []*agent.Agent
+    mu          sync.RWMutex  // Protects all fields
+    synthesized bool
+}
+
+// Write operations use Lock()
+func (c *Context) SetString(name, value string) *StringRef {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    
+    ref := &StringRef{...}
+    c.variables[name] = ref
+    return ref
+}
+
+// Read operations use RLock()
+func (c *Context) Get(name string) Ref {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+    
+    return c.variables[name]
+}
+
+// Inspection methods return copies (prevent external modification)
+func (c *Context) Variables() map[string]Ref {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+    
+    result := make(map[string]Ref, len(c.variables))
+    for k, v := range c.variables {
+        result[k] = v
+    }
+    return result  // Return copy, not original
+}
+```
+
+**Pattern Details**:
+- `sync.RWMutex` allows multiple concurrent readers OR single writer
+- Read-heavy workload (many `Get()` calls, few `Set()` calls) benefits from RWMutex
+- `defer` ensures unlock even if panic occurs
+- Inspection methods return copies to prevent external mutation
+
+**Prevention**:
+- Always acquire lock before accessing shared state
+- Use `defer` for unlock to handle early returns and panics
+- Return copies from inspection methods, not internal references
+- Test with `go test -race` to catch data races
+
+**Testing**:
+- Concurrent access test with 10 goroutines
+- Verified with Go race detector (`-race` flag)
+- No races detected
+
+**Impact**: Context is safe for concurrent use. Prevents subtle bugs in production.
+
+**Cross-Language Note**:
+- **Python approach**: GIL provides some thread safety, but still need locks for dict modification
+- **Go approach**: Explicit synchronization with RWMutex
+- **Conceptual similarity**: Both need synchronization for shared mutable state
+
+---
+
+### 2026-01-16 - Typed Context System: Pulumi-Style Run() Pattern
+
+**Problem**: Need clean lifecycle management for resource synthesis - when to synthesize workflows/agents?
+
+**Root Cause**:
+- Resources (workflows, agents) created throughout program execution
+- Need single point where synthesis happens
+- Want automatic synthesis on success, no synthesis on error
+- Need to prevent duplicate synthesis
+- User shouldn't have to remember to call `Synthesize()`
+
+**Solution**: Adopted Pulumi's `Run()` pattern for lifecycle management
+
+**Implementation**:
+```go
+// Run() function wraps user code
+func Run(fn func(*Context) error) error {
+    ctx := newContext()
+    
+    // Execute user function
+    if err := fn(ctx); err != nil {
+        return fmt.Errorf("context function failed: %w", err)
+    }
+    
+    // Synthesize all resources (only on success)
+    if err := ctx.Synthesize(); err != nil {
+        return fmt.Errorf("synthesis failed: %w", err)
+    }
+    
+    return nil
+}
+
+// User code
+func main() {
+    err := stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+        // Create variables
+        apiURL := ctx.SetString("apiURL", "https://api.example.com")
+        
+        // Create workflows/agents
+        wf, err := workflow.New(ctx, ...)
+        if err != nil {
+            return err  // Error propagates, synthesis SKIPPED
+        }
+        
+        return nil  // Success: synthesis HAPPENS
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+**Pattern Benefits**:
+1. **Clean boundaries**: Context lifetime is explicit (function scope)
+2. **Automatic cleanup**: Synthesis happens automatically on success
+3. **Error propagation**: Errors short-circuit synthesis
+4. **Prevents duplicates**: Only one synthesis per Run()
+5. **Familiar pattern**: IaC developers know this from Pulumi
+
+**Prevention**:
+- Use `Run()` as entry point, not direct `newContext()` + `Synthesize()`
+- Return errors from user function to skip synthesis
+- Don't call `Synthesize()` manually (Run() does it)
+- Keep user function focused on resource creation
+
+**Testing**:
+- Success case: Synthesis called
+- Error case: Synthesis NOT called
+- Context provided to user function
+- All fields initialized correctly
+
+**Impact**: Clean, idiomatic API for lifecycle management. Prevents synthesis bugs.
+
+**Cross-Language Note**:
+- **Pulumi SDK**: Originated this pattern (TypeScript, Python, Go versions)
+- **Terraform CDK**: Uses App/Stack pattern (similar concept)
+- **AWS CDK**: Uses App/Stack pattern
+- **Stigmer SDK**: Adopted Run() pattern for familiarity to IaC developers
+
+---
+
+### 2026-01-16 - Typed Context System: Typed Getter Pattern
+
+**Problem**: Generic `Get(name) Ref` requires type assertion at call site. Cumbersome for users.
+
+**Root Cause**:
+- `Get()` returns `Ref` interface
+- User needs to type-assert: `ref.(*StringRef)` with nil check
+- Boilerplate at every call site
+- Easy to forget nil check (panic risk)
+
+**Solution**: Implemented typed getter methods that handle assertion internally
+
+**Implementation**:
+```go
+// Generic getter (still available)
+func (c *Context) Get(name string) Ref {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+    return c.variables[name]
+}
+
+// Typed getters (NEW)
+func (c *Context) GetString(name string) *StringRef {
+    ref := c.Get(name)
+    if stringRef, ok := ref.(*StringRef); ok {
+        return stringRef
+    }
+    return nil  // Wrong type or not found
+}
+
+func (c *Context) GetInt(name string) *IntRef {
+    ref := c.Get(name)
+    if intRef, ok := ref.(*IntRef); ok {
+        return intRef
+    }
+    return nil
+}
+
+// Similar for GetBool(), GetObject()
+```
+
+**Usage Comparison**:
+```go
+// BEFORE: Generic getter + manual assertion
+ref := ctx.Get("apiURL")
+apiURL, ok := ref.(*StringRef)
+if !ok {
+    // Handle wrong type
+}
+// Use apiURL
+
+// AFTER: Typed getter
+apiURL := ctx.GetString("apiURL")
+if apiURL != nil {
+    // Use apiURL
+}
+```
+
+**Pattern Benefits**:
+1. **Less boilerplate**: One call instead of get + assert + check
+2. **Safer**: Returns nil for wrong type (no panic)
+3. **More idiomatic**: Common Go pattern for typed access
+4. **Better errors**: User knows nil means wrong type or not found
+
+**Prevention**:
+- Provide typed getters for all Ref types
+- Return nil for wrong type (don't panic)
+- Document that nil means "not found or wrong type"
+- Keep generic `Get()` for when type is unknown
+
+**Testing**:
+- Test typed getter returns correct type
+- Test wrong type returns nil
+- Test not found returns nil
+
+**Impact**: More ergonomic API. Users write less code, fewer bugs.
+
+**Cross-Language Note**:
+- **Python approach**: Would use type hints with Optional[StringRef]
+- **Go approach**: Multiple methods, return nil for mismatch
+- **Conceptual similarity**: Both provide type-safe access without runtime exceptions
+
+---
+
 ### 2026-01-15 - Complete Workflow SDK with 12 Task Types
 
 **Problem**: Need to implement workflow support in Go SDK following same patterns as agent package, covering all 12 Zigflow DSL task types.
