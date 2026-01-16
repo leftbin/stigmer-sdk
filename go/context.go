@@ -52,6 +52,17 @@ func newContext() *Context {
 	}
 }
 
+// NewContext creates a new Context instance for testing or advanced use cases.
+// For normal usage, prefer using Run() which handles context lifecycle automatically.
+//
+// Example (testing):
+//
+//	ctx := stigmeragent.NewContext()
+//	apiURL := ctx.SetString("apiURL", "https://api.example.com")
+func NewContext() *Context {
+	return newContext()
+}
+
 // =============================================================================
 // Variable Management - Typed Setters
 // =============================================================================

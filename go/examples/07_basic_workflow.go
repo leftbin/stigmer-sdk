@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Package examples demonstrates how to create workflows using the Stigmer SDK.
+// Package examples demonstrates how to create workflows using the Stigmer SDK with typed context.
 package main
 
 import (
@@ -11,77 +11,93 @@ import (
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
-// This example demonstrates creating a basic workflow with SET and HTTP_CALL tasks.
+// This example demonstrates creating a workflow with typed context variables.
 //
 // The workflow:
-// 1. Initializes variables
-// 2. Makes an HTTP GET request to fetch data
-// 3. Processes the response
+// 1. Initializes variables using typed context (SetString, SetInt)
+// 2. Makes an HTTP GET request using context variables
+// 3. Processes the response using field references
 //
-// Key improvements demonstrated:
-// - Optional version (can omit for development workflows)
-// - Type-safe task references with .ThenRef()
-// - Type-safe setters (SetInt, SetString, SetBool)
-// - High-level helpers (ExportAll, VarRef, FieldRef, Interpolate)
+// Key features demonstrated:
+// - stigmer.Run() pattern for automatic context management
+// - Typed context variables (apiURL, retryCount)
+// - Compile-time checked references (no string typos)
+// - IDE autocomplete for context variables
+// - Type-safe task builders accepting Ref types
+// - Automatic synthesis on completion
 func main() {
-	// Enable auto-synthesis - workflows will be written to manifest.pb on exit
-	defer stigmeragent.Complete()
+	// Use stigmer.Run() for automatic context and synthesis management
+	err := stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+		// Create typed context variables (compile-time checked!)
+		apiURL := ctx.SetString("apiURL", "https://jsonplaceholder.typicode.com")
+		retryCount := ctx.SetInt("retryCount", 0)
 
-	// Create environment variable for API token
-	apiToken, err := environment.New(
-		environment.WithName("API_TOKEN"),
-		environment.WithSecret(true),
-		environment.WithDescription("Authentication token for the API"),
-	)
+		// Create environment variable for API token
+		apiToken, err := environment.New(
+			environment.WithName("API_TOKEN"),
+			environment.WithSecret(true),
+			environment.WithDescription("Authentication token for the API"),
+		)
+		if err != nil {
+			return err
+		}
+
+		// Task 1: Initialize variables using context references
+		// Note: We're using the typed references directly!
+		initTask := workflow.SetTask("initialize",
+			workflow.SetVar("currentURL", apiURL),         // Use typed reference
+			workflow.SetVar("currentRetries", retryCount), // Use typed reference
+		)
+
+		// Task 2: Fetch data from API using typed context variable
+		// The apiURL reference is compile-time checked - no string typos possible!
+		endpoint := apiURL.Concat("/posts/1") // Type-safe string concatenation
+
+		fetchTask := workflow.HttpCallTask("fetchData",
+			workflow.WithHTTPGet(),
+			workflow.WithURI(endpoint), // Use the typed reference
+			workflow.WithHeader("Content-Type", "application/json"),
+			workflow.WithTimeout(30),
+		).ExportAll()
+
+		// Task 3: Process the response using field references
+		processTask := workflow.SetTask("processResponse",
+			workflow.SetVar("postTitle", workflow.FieldRef("title")),
+			workflow.SetVar("postBody", workflow.FieldRef("body")),
+			workflow.SetString("status", "success"),
+		)
+
+		// Connect tasks using type-safe references (refactoring-safe!)
+		initTask.ThenRef(fetchTask)
+		fetchTask.ThenRef(processTask)
+
+		// Create the workflow with typed context
+		wf, err := workflow.NewWithContext(ctx,
+			// Required metadata
+			workflow.WithNamespace("data-processing"),
+			workflow.WithName("basic-data-fetch"),
+
+			// Optional fields
+			workflow.WithVersion("1.0.0"),
+			workflow.WithDescription("Fetch data from an external API using typed context"),
+			workflow.WithOrg("my-org"),
+			workflow.WithEnvironmentVariable(apiToken),
+
+			// Tasks
+			workflow.WithTasks(initTask, fetchTask, processTask),
+		)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("Created workflow: %s", wf)
+		log.Println("Workflow will be synthesized automatically on completion")
+		return nil
+	})
+
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Task 1: Initialize variables using type-safe setters
-	initTask := workflow.SetTask("initialize",
-		workflow.SetString("apiURL", "https://jsonplaceholder.typicode.com"),
-		workflow.SetInt("retryCount", 0), // Type-safe integer instead of string "0"
-	)
-
-	// Task 2: Fetch data from API using variable interpolation
-	// Using JSONPlaceholder - a free fake REST API for testing and prototyping
-	fetchTask := workflow.HttpCallTask("fetchData",
-		workflow.WithHTTPGet(), // Type-safe HTTP method
-		workflow.WithURI(workflow.Interpolate(workflow.VarRef("apiURL"), "/posts/1")), // Fetch a real post
-		workflow.WithHeader("Content-Type", "application/json"),
-		workflow.WithTimeout(30),
-	).ExportAll() // High-level helper instead of Export("${.}")
-
-	// Task 3: Process the response using field references
-	processTask := workflow.SetTask("processResponse",
-		workflow.SetVar("postTitle", workflow.FieldRef("title")), // Extract the post title
-		workflow.SetVar("postBody", workflow.FieldRef("body")),   // Extract the post body
-		workflow.SetString("status", "success"),
-	)
-
-	// Connect tasks using type-safe references (refactoring-safe!)
-	initTask.ThenRef(fetchTask)
-	fetchTask.ThenRef(processTask)
-
-	// Create the workflow with tasks (version is optional)
-	wf, err := workflow.New(
-		// Required metadata
-		workflow.WithNamespace("data-processing"),
-		workflow.WithName("basic-data-fetch"),
-
-		// Optional fields
-		workflow.WithVersion("1.0.0"), // Optional - defaults to "0.1.0" if omitted
-		workflow.WithDescription("Fetch data from an external API"),
-		workflow.WithOrg("my-org"),
-		workflow.WithEnvironmentVariable(apiToken),
-
-		// Tasks
-		workflow.WithTasks(initTask, fetchTask, processTask),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Printf("Created workflow: %s", wf)
-	log.Println("Workflow will be written to manifest.pb on exit")
+	log.Println("✅ Workflow created and synthesized successfully!")
 }

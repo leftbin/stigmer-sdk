@@ -1,9 +1,20 @@
 package workflow
 
 import (
+	"fmt"
+
 	"github.com/leftbin/stigmer-sdk/go/environment"
 	"github.com/leftbin/stigmer-sdk/go/internal/registry"
 )
+
+// Context is a minimal interface that represents a stigmer context.
+// This allows the workflow package to work with contexts without importing
+// the stigmeragent package (avoiding import cycles).
+//
+// The stigmeragent.Context type implements this interface.
+type Context interface {
+	RegisterWorkflow(*Workflow)
+}
 
 // Workflow represents a workflow orchestration definition.
 //
@@ -19,6 +30,16 @@ import (
 //	    workflow.WithVersion("1.0.0"),
 //	    workflow.WithDescription("Process data from external API"),
 //	)
+//
+// Or use with typed context (recommended):
+//
+//	stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+//	    wf, err := workflow.New(ctx,
+//	        workflow.WithNamespace("my-org"),
+//	        workflow.WithName("data-pipeline"),
+//	    )
+//	    return err
+//	})
 type Workflow struct {
 	// Workflow metadata (namespace, name, version, description)
 	Document Document
@@ -34,6 +55,9 @@ type Workflow struct {
 
 	// Organization that owns this workflow (optional)
 	Org string
+
+	// Context reference (optional, used for typed variable management)
+	ctx Context
 }
 
 // Option is a functional option for configuring a Workflow.
@@ -65,6 +89,8 @@ type Option func(*Workflow) error
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
+//
+// For workflows using typed context, use NewWithContext() instead.
 func New(opts ...Option) (*Workflow, error) {
 	w := &Workflow{
 		Document: Document{
@@ -93,6 +119,63 @@ func New(opts ...Option) (*Workflow, error) {
 
 	// Register in global registry for synthesis
 	registry.Global().RegisterWorkflow(w)
+
+	return w, nil
+}
+
+// NewWithContext creates a new Workflow with a typed context for variable management.
+//
+// This is the recommended way to create workflows when using typed context variables.
+// The workflow is automatically registered with the provided context for synthesis.
+//
+// Required options:
+//   - WithNamespace: workflow namespace
+//   - WithName: workflow name
+//
+// Optional (with defaults):
+//   - WithVersion: workflow version (defaults to "0.1.0" if not provided)
+//   - WithDescription: human-readable description
+//   - WithOrg: organization identifier
+//
+// Example:
+//
+//	stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+//	    wf, err := workflow.NewWithContext(ctx,
+//	        workflow.WithNamespace("data-processing"),
+//	        workflow.WithName("daily-sync"),
+//	        workflow.WithVersion("1.0.0"),
+//	    )
+//	    return err
+//	})
+func NewWithContext(ctx Context, opts ...Option) (*Workflow, error) {
+	w := &Workflow{
+		Document: Document{
+			DSL: "1.0.0", // Default DSL version
+		},
+		Tasks:                []*Task{},
+		EnvironmentVariables: []environment.Variable{},
+		ctx:                  ctx,
+	}
+
+	// Apply all options
+	for _, opt := range opts {
+		if err := opt(w); err != nil {
+			return nil, err
+		}
+	}
+
+	// Auto-generate version if not provided
+	if w.Document.Version == "" {
+		w.Document.Version = "0.1.0" // Default version for development
+	}
+
+	// Validate the workflow
+	if err := validate(w); err != nil {
+		return nil, err
+	}
+
+	// Register with context
+	ctx.RegisterWorkflow(w)
 
 	return w, nil
 }
@@ -162,12 +245,30 @@ func WithDescription(description string) Option {
 //
 // This is an optional field.
 //
-// Example:
+// Accepts either a string or a StringRef from context.
 //
-//	workflow.WithOrg("my-org")
-func WithOrg(org string) Option {
+// Examples:
+//
+//	workflow.WithOrg("my-org")                                    // Legacy string
+//	workflow.WithOrg(ctx.SetString("org", "my-org"))              // Typed context
+func WithOrg(org interface{}) Option {
 	return func(w *Workflow) error {
-		w.Org = org
+		// Convert to string using the helper
+		switch v := org.(type) {
+		case string:
+			w.Org = v
+		case Ref:
+			// For synthesis, we need the actual value
+			// For StringRef, we can extract the value
+			if stringVal, ok := v.(interface{ Value() string }); ok {
+				w.Org = stringVal.Value()
+			} else {
+				// Fallback: use expression (though this is uncommon for org)
+				w.Org = v.Expression()
+			}
+		default:
+			w.Org = fmt.Sprintf("%v", org)
+		}
 		return nil
 	}
 }

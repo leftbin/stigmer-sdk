@@ -160,10 +160,17 @@ func SetTask(name string, opts ...SetTaskOption) *Task {
 type SetTaskOption func(*SetTaskConfig)
 
 // SetVar adds a variable to a SET task.
+// Accepts either a string or a Ref type for the value.
 // For better type safety, consider using SetInt, SetString, SetBool instead.
-func SetVar(key, value string) SetTaskOption {
+//
+// Examples:
+//
+//	SetVar("apiURL", "https://api.example.com")     // Legacy string
+//	SetVar("apiURL", ctx.SetString("url", "..."))   // Typed context
+//	SetVar("endpoint", apiURL.Concat("/users"))     // StringRef transformation
+func SetVar(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = value
+		cfg.Variables[key] = toExpression(value)
 	}
 }
 
@@ -177,36 +184,57 @@ func SetVars(vars map[string]string) SetTaskOption {
 }
 
 // SetInt adds an integer variable to a SET task with automatic type conversion.
+// Accepts either an int or an IntRef from context.
 // This is a high-level helper that provides better UX than SetVar("count", "0").
-// Example: SetTask("init", SetInt("count", 0))
-func SetInt(key string, value int) SetTaskOption {
+//
+// Examples:
+//
+//	SetInt("count", 0)                          // Legacy int
+//	SetInt("count", ctx.SetInt("retries", 3))   // Typed context
+//	SetInt("count", counter.Add(1))             // IntRef transformation
+func SetInt(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = fmt.Sprintf("%d", value)
+		cfg.Variables[key] = toExpression(value)
 	}
 }
 
 // SetString adds a string variable to a SET task.
+// Accepts either a string or a StringRef from context.
 // This is semantically clearer than SetVar for string values.
-// Example: SetTask("init", SetString("status", "pending"))
-func SetString(key, value string) SetTaskOption {
+//
+// Examples:
+//
+//	SetString("status", "pending")                      // Legacy string
+//	SetString("status", ctx.SetString("state", "..."))  // Typed context
+//	SetString("url", apiURL.Concat("/users"))           // StringRef transformation
+func SetString(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = value
+		cfg.Variables[key] = toExpression(value)
 	}
 }
 
 // SetBool adds a boolean variable to a SET task with automatic type conversion.
-// Example: SetTask("init", SetBool("enabled", true))
-func SetBool(key string, value bool) SetTaskOption {
+// Accepts either a bool or a BoolRef from context.
+//
+// Examples:
+//
+//	SetBool("enabled", true)                       // Legacy bool
+//	SetBool("enabled", ctx.SetBool("isProd", true)) // Typed context
+func SetBool(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = fmt.Sprintf("%t", value)
+		cfg.Variables[key] = toExpression(value)
 	}
 }
 
 // SetFloat adds a float variable to a SET task with automatic type conversion.
-// Example: SetTask("init", SetFloat("price", 99.99))
-func SetFloat(key string, value float64) SetTaskOption {
+// Accepts either a float or numeric value.
+//
+// Example:
+//
+//	SetFloat("price", 99.99)
+func SetFloat(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = fmt.Sprintf("%f", value)
+		cfg.Variables[key] = toExpression(value)
 	}
 }
 
@@ -324,16 +352,30 @@ func WithHTTPOptions() HttpCallTaskOption {
 }
 
 // WithURI sets the HTTP URI.
-func WithURI(uri string) HttpCallTaskOption {
+// Accepts either a string or a Ref type (e.g., StringRef from context).
+//
+// Examples:
+//
+//	WithURI("https://api.example.com")                     // Legacy string
+//	WithURI(ctx.SetString("apiURL", "https://..."))        // Typed context
+//	WithURI(apiURL.Concat("/users"))                       // StringRef transformation
+func WithURI(uri interface{}) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
-		cfg.URI = uri
+		cfg.URI = toExpression(uri)
 	}
 }
 
 // WithHeader adds an HTTP header.
-func WithHeader(key, value string) HttpCallTaskOption {
+// Accepts either strings or Ref types for both key and value.
+//
+// Examples:
+//
+//	WithHeader("Content-Type", "application/json")                // Legacy strings
+//	WithHeader("Authorization", ctx.SetSecret("token", "..."))    // Secret ref
+//	WithHeader("Authorization", token.Prepend("Bearer "))         // StringRef transformation
+func WithHeader(key string, value interface{}) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
-		cfg.Headers[key] = value
+		cfg.Headers[key] = toExpression(value)
 	}
 }
 
@@ -354,9 +396,15 @@ func WithBody(body map[string]any) HttpCallTaskOption {
 }
 
 // WithTimeout sets the request timeout in seconds.
-func WithTimeout(seconds int32) HttpCallTaskOption {
+// Accepts either an int or an IntRef from context.
+//
+// Examples:
+//
+//	WithTimeout(30)                                // Legacy int
+//	WithTimeout(ctx.SetInt("timeout", 30))         // Typed context
+func WithTimeout(seconds interface{}) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
-		cfg.TimeoutSeconds = seconds
+		cfg.TimeoutSeconds = toInt32(seconds)
 	}
 }
 
@@ -402,16 +450,28 @@ func GrpcCallTask(name string, opts ...GrpcCallTaskOption) *Task {
 type GrpcCallTaskOption func(*GrpcCallTaskConfig)
 
 // WithService sets the gRPC service name.
-func WithService(service string) GrpcCallTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithService("UserService")                        // Legacy string
+//	WithService(ctx.SetString("service", "..."))      // Typed context
+func WithService(service interface{}) GrpcCallTaskOption {
 	return func(cfg *GrpcCallTaskConfig) {
-		cfg.Service = service
+		cfg.Service = toExpression(service)
 	}
 }
 
 // WithGrpcMethod sets the gRPC method name.
-func WithGrpcMethod(method string) GrpcCallTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithGrpcMethod("GetUser")                         // Legacy string
+//	WithGrpcMethod(ctx.SetString("method", "..."))    // Typed context
+func WithGrpcMethod(method interface{}) GrpcCallTaskOption {
 	return func(cfg *GrpcCallTaskConfig) {
-		cfg.Method = method
+		cfg.Method = toExpression(method)
 	}
 }
 
@@ -552,9 +612,15 @@ func ForTask(name string, opts ...ForTaskOption) *Task {
 type ForTaskOption func(*ForTaskConfig)
 
 // WithIn sets the collection expression.
-func WithIn(expr string) ForTaskOption {
+// Accepts either a string expression or a Ref from context.
+//
+// Examples:
+//
+//	WithIn("${.items}")                              // Legacy expression
+//	WithIn(ctx.SetObject("items", [...]))            // Typed context
+func WithIn(expr interface{}) ForTaskOption {
 	return func(cfg *ForTaskConfig) {
-		cfg.In = expr
+		cfg.In = toExpression(expr)
 	}
 }
 
@@ -740,9 +806,15 @@ func ListenTask(name string, opts ...ListenTaskOption) *Task {
 type ListenTaskOption func(*ListenTaskConfig)
 
 // WithEvent sets the event to listen for.
-func WithEvent(event string) ListenTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithEvent("approval.granted")                        // Legacy string
+//	WithEvent(ctx.SetString("eventName", "..."))         // Typed context
+func WithEvent(event interface{}) ListenTaskOption {
 	return func(cfg *ListenTaskConfig) {
-		cfg.Event = event
+		cfg.Event = toExpression(event)
 	}
 }
 
@@ -782,18 +854,19 @@ func WaitTask(name string, opts ...WaitTaskOption) *Task {
 type WaitTaskOption func(*WaitTaskConfig)
 
 // WithDuration sets the wait duration.
-// Accepts both string format and type-safe duration helpers.
+// Accepts string format, duration helpers, or Ref types.
 //
 // String format examples: "5s", "1m", "1h", "1d"
 //
-// For better type safety and IDE support, consider using duration helpers:
+// Examples:
 //
-//	workflow.WithDuration(workflow.Seconds(5))   // Type-safe
-//	workflow.WithDuration(workflow.Minutes(30))  // Discoverable
-//	workflow.WithDuration("5s")                  // Also valid
-func WithDuration(duration string) WaitTaskOption {
+//	workflow.WithDuration(workflow.Seconds(5))              // Type-safe helper
+//	workflow.WithDuration(workflow.Minutes(30))             // Discoverable
+//	workflow.WithDuration("5s")                             // Legacy string
+//	workflow.WithDuration(ctx.SetString("wait", "10s"))     // Typed context
+func WithDuration(duration interface{}) WaitTaskOption {
 	return func(cfg *WaitTaskConfig) {
-		cfg.Duration = duration
+		cfg.Duration = toExpression(duration)
 	}
 }
 
@@ -912,9 +985,15 @@ func CallActivityTask(name string, opts ...CallActivityTaskOption) *Task {
 type CallActivityTaskOption func(*CallActivityTaskConfig)
 
 // WithActivity sets the activity name.
-func WithActivity(activity string) CallActivityTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithActivity("DataProcessor")                        // Legacy string
+//	WithActivity(ctx.SetString("activity", "..."))       // Typed context
+func WithActivity(activity interface{}) CallActivityTaskOption {
 	return func(cfg *CallActivityTaskConfig) {
-		cfg.Activity = activity
+		cfg.Activity = toExpression(activity)
 	}
 }
 
@@ -966,16 +1045,28 @@ func RaiseTask(name string, opts ...RaiseTaskOption) *Task {
 type RaiseTaskOption func(*RaiseTaskConfig)
 
 // WithError sets the error type.
-func WithError(errorType string) RaiseTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithError("ValidationError")                         // Legacy string
+//	WithError(ctx.SetString("errorType", "..."))         // Typed context
+func WithError(errorType interface{}) RaiseTaskOption {
 	return func(cfg *RaiseTaskConfig) {
-		cfg.Error = errorType
+		cfg.Error = toExpression(errorType)
 	}
 }
 
 // WithErrorMessage sets the error message.
-func WithErrorMessage(message string) RaiseTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithErrorMessage("Invalid input")                    // Legacy string
+//	WithErrorMessage(ctx.SetString("errMsg", "..."))     // Typed context
+func WithErrorMessage(message interface{}) RaiseTaskOption {
 	return func(cfg *RaiseTaskConfig) {
-		cfg.Message = message
+		cfg.Message = toExpression(message)
 	}
 }
 
@@ -1026,9 +1117,15 @@ func RunTask(name string, opts ...RunTaskOption) *Task {
 type RunTaskOption func(*RunTaskConfig)
 
 // WithWorkflow sets the sub-workflow name.
-func WithWorkflow(workflow string) RunTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithWorkflow("data-processor")                       // Legacy string
+//	WithWorkflow(ctx.SetString("workflow", "..."))       // Typed context
+func WithWorkflow(workflow interface{}) RunTaskOption {
 	return func(cfg *RunTaskConfig) {
-		cfg.WorkflowName = workflow
+		cfg.WorkflowName = toExpression(workflow)
 	}
 }
 
