@@ -207,6 +207,59 @@ func stringSliceToInterfaceSlice(slice []string) []interface{} {
 	return result
 }
 
+// convertNestedTasksToMaps recursively converts a slice of Tasks to proto-compatible maps.
+// This ensures nested tasks (in FOR, FORK, TRY) have all required fields, not just name/kind.
+//
+// Each task map includes:
+// - name: task identifier
+// - kind: task type (converted to proto enum string)
+// - task_config: task configuration as map (not Struct, to avoid nested Struct issues)
+// - export: export configuration (if present)
+// - flow: flow control (if present)
+func convertNestedTasksToMaps(tasks []workflow.Task) ([]interface{}, error) {
+	if tasks == nil {
+		return nil, nil
+	}
+	
+	result := make([]interface{}, len(tasks))
+	for i, task := range tasks {
+		// Convert task config to Struct
+		taskConfig, err := taskConfigToStruct(&task)
+		if err != nil {
+			return nil, fmt.Errorf("converting nested task[%d] %s config: %w", i, task.Name, err)
+		}
+		
+		// Convert the Struct back to a map to avoid nested Struct issues
+		// structpb.NewStruct() cannot handle *structpb.Struct as a value
+		taskConfigMap := taskConfig.AsMap()
+		
+		// Build task map with all required proto fields
+		taskMap := map[string]interface{}{
+			"name":        task.Name,
+			"kind":        taskKindToProtoKind(task.Kind).String(),
+			"task_config": taskConfigMap,
+		}
+		
+		// Add export if present
+		if task.ExportAs != "" {
+			taskMap["export"] = map[string]interface{}{
+				"as": task.ExportAs,
+			}
+		}
+		
+		// Add flow control if present
+		if task.ThenTask != "" {
+			taskMap["flow"] = map[string]interface{}{
+				"then": task.ThenTask,
+			}
+		}
+		
+		result[i] = taskMap
+	}
+	
+	return result, nil
+}
+
 // taskConfigToStruct converts task configuration to google.protobuf.Struct.
 func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 	var configMap map[string]interface{}
@@ -241,54 +294,117 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 	case workflow.TaskKindSwitch:
 		cfg := task.Config.(*workflow.SwitchTaskConfig)
 		cases := make([]map[string]interface{}, len(cfg.Cases))
+		
+		// Track if we have a default case (empty condition)
+		hasExplicitDefault := false
+		
 		for i, c := range cfg.Cases {
-			cases[i] = map[string]interface{}{
-				"condition": c.Condition,
-				"then":      c.Then,
+			caseMap := map[string]interface{}{
+				// Generate case name (proto requires it)
+				"name": fmt.Sprintf("case%d", i+1),
+				// Map Go "Condition" → Proto "when"
+				"when": c.Condition,
+				"then": c.Then,
 			}
+			
+			// Check if this is a default case (empty condition)
+			if c.Condition == "" {
+				hasExplicitDefault = true
+			}
+			
+			cases[i] = caseMap
 		}
+		
+		// If DefaultTask is specified and we don't have an explicit default case,
+		// add it as the last case with empty "when"
+		if cfg.DefaultTask != "" && !hasExplicitDefault {
+			defaultCase := map[string]interface{}{
+				"name": "default",
+				"when": "",  // Empty condition = default case
+				"then": cfg.DefaultTask,
+			}
+			cases = append(cases, defaultCase)
+		}
+		
 		configMap = map[string]interface{}{
-			"cases":   mapSliceToInterfaceSlice(cases),
-			"default": cfg.DefaultTask,
+			"cases": mapSliceToInterfaceSlice(cases),
 		}
 
 	case workflow.TaskKindFor:
 		cfg := task.Config.(*workflow.ForTaskConfig)
-		doTasks := make([]map[string]interface{}, len(cfg.Do))
-		for i, t := range cfg.Do {
-			doTasks[i] = map[string]interface{}{
-				"name": t.Name,
-				"kind": string(t.Kind), // Convert TaskKind enum to string
-			}
+		
+		// Convert nested tasks fully (not just name/kind)
+		doTasks, err := convertNestedTasksToMaps(cfg.Do)
+		if err != nil {
+			return nil, fmt.Errorf("converting FOR task nested tasks: %w", err)
 		}
+		
 		configMap = map[string]interface{}{
-			"in": cfg.In,
-			"do": mapSliceToInterfaceSlice(doTasks),
+			// Default "each" to "item" for now
+			// TODO: Add "Each" field to ForTaskConfig Go struct for better UX
+			"each": "item",
+			"in":   cfg.In,
+			"do":   doTasks,
 		}
 
 	case workflow.TaskKindFork:
 		cfg := task.Config.(*workflow.ForkTaskConfig)
 		branches := make([]map[string]interface{}, len(cfg.Branches))
+		
 		for i, b := range cfg.Branches {
+			// Convert nested tasks in each branch
+			doTasks, err := convertNestedTasksToMaps(b.Tasks)
+			if err != nil {
+				return nil, fmt.Errorf("converting FORK branch[%d] %s tasks: %w", i, b.Name, err)
+			}
+			
 			branches[i] = map[string]interface{}{
 				"name": b.Name,
+				"do":   doTasks,
 			}
 		}
+		
 		configMap = map[string]interface{}{
 			"branches": mapSliceToInterfaceSlice(branches),
+			// Default "compete" to false (all branches must complete)
+			// TODO: Add "Compete" field to ForkTaskConfig Go struct for race mode support
+			"compete": false,
 		}
 
 	case workflow.TaskKindTry:
 		cfg := task.Config.(*workflow.TryTaskConfig)
-		catchBlocks := make([]map[string]interface{}, len(cfg.Catch))
-		for i, c := range cfg.Catch {
-			catchBlocks[i] = map[string]interface{}{
-				"errors": stringSliceToInterfaceSlice(c.Errors), // Convert []string to []interface{}
-				"as":     c.As,
-			}
+		
+		// Convert "try" tasks (proto uses "try", not "tasks")
+		tryTasks, err := convertNestedTasksToMaps(cfg.Tasks)
+		if err != nil {
+			return nil, fmt.Errorf("converting TRY task 'try' tasks: %w", err)
 		}
+		
 		configMap = map[string]interface{}{
-			"catch": mapSliceToInterfaceSlice(catchBlocks),
+			"try": tryTasks,
+		}
+		
+		// Handle catch blocks (proto expects singular "catch", not array)
+		// If multiple catch blocks exist in Go, use the first one
+		// TODO: Update TryTaskConfig Go struct to use singular Catch for proto alignment
+		if len(cfg.Catch) > 0 {
+			firstCatch := cfg.Catch[0]
+			
+			// Convert catch tasks
+			catchTasks, err := convertNestedTasksToMaps(firstCatch.Tasks)
+			if err != nil {
+				return nil, fmt.Errorf("converting TRY task 'catch' tasks: %w", err)
+			}
+			
+			catchBlock := map[string]interface{}{
+				"as": firstCatch.As,
+				"do": catchTasks,
+				// Note: Proto doesn't have "errors" field for filtering by error type
+				// The Go struct has it for UX, but we can't map it to proto
+				// TODO: Discuss with team if proto should support error type filtering
+			}
+			
+			configMap["catch"] = catchBlock
 		}
 
 	case workflow.TaskKindListen:
