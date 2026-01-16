@@ -74,7 +74,7 @@ func (t *Task) ExportAll() *Task {
 // This is a high-level helper that replaces Export("${.field}").
 // Example: HttpCallTask("fetch",...).ExportField("count")
 func (t *Task) ExportField(fieldName string) *Task {
-	t.ExportAs = fmt.Sprintf("${.%s}", fieldName)
+	t.ExportAs = fmt.Sprintf("${ $context.%s }", fieldName)
 	return t
 }
 
@@ -1045,39 +1045,39 @@ func WithWorkflowInput(input map[string]any) RunTaskOption {
 
 // VarRef creates a reference to a workflow variable from context.
 // Variables set via SetTask are stored in the workflow context and must be
-// referenced with dot notation in Serverless Workflow DSL.
+// referenced using $context in JQ expressions.
 //
 // Example: WithURI(Interpolate(VarRef("apiURL"), "/data"))
-// Generates: ${ .apiURL + "/data" }
+// Generates: ${ $context.apiURL + "/data" }
 //
 // Note: This is for variables set in the workflow (via set: tasks).
 // For environment variables, use a different helper (future).
 func VarRef(varName string) string {
-	return fmt.Sprintf("${.%s}", varName)
+	return fmt.Sprintf("${ $context.%s }", varName)
 }
 
 // FieldRef creates a reference to a field in the current context.
 // This is a high-level helper that replaces manual "${.field}" syntax.
-// Example: SetVar("count", FieldRef("count")) instead of SetVar("count", "${.count}")
+// Example: SetVar("count", FieldRef("count")) instead of SetVar("count", "${ $context.count }")
 func FieldRef(fieldPath string) string {
-	return fmt.Sprintf("${.%s}", fieldPath)
+	return fmt.Sprintf("${ $context.%s }", fieldPath)
 }
 
 // Interpolate combines static text with variable references into a valid expression.
 // 
-// When mixing expressions (${...}) with static strings, this creates a proper
-// Serverless Workflow DSL expression using concatenation syntax.
+// When mixing expressions (${ ... }) with static strings, this creates a proper
+// JQ expression using concatenation syntax.
 //
 // Examples:
 //   - Interpolate(VarRef("apiURL"), "/data") 
-//     → ${ apiURL + "/data" } ✅
+//     → ${ $context.apiURL + "/data" } ✅
 //   - Interpolate("Bearer ", VarRef("token"))
-//     → ${ "Bearer " + token } ✅
+//     → ${ "Bearer " + $context.token } ✅
 //   - Interpolate("https://", VarRef("domain"), "/api/v1")
-//     → ${ "https://" + domain + "/api/v1" } ✅
+//     → ${ "https://" + $context.domain + "/api/v1" } ✅
 //
 // Special cases:
-//   - Interpolate(VarRef("url")) → ${url} (single expression, no concatenation)
+//   - Interpolate(VarRef("url")) → ${ $context.url } (single expression, no concatenation)
 //   - Interpolate("https://api.example.com") → https://api.example.com (plain string)
 func Interpolate(parts ...string) string {
 	if len(parts) == 0 {
@@ -1108,7 +1108,8 @@ func Interpolate(parts ...string) string {
 	for _, part := range parts {
 		if strings.HasPrefix(part, "${") && strings.HasSuffix(part, "}") {
 			// Extract expression content (remove ${ and })
-			expr := part[2 : len(part)-1]
+			// Handle both formats: "${...}" and "${ ... }" (with spaces)
+			expr := strings.TrimSpace(part[2 : len(part)-1])
 			exprParts = append(exprParts, expr)
 		} else {
 			// Quote static strings
@@ -1125,7 +1126,7 @@ func Interpolate(parts ...string) string {
 // ============================================================================
 
 // ErrorMessage returns a reference to the message field of a caught error.
-// This is a type-safe helper that replaces manual "${errorVar.message}" syntax.
+// This is a type-safe helper that replaces manual "${ .errorVar.message }" syntax.
 //
 // When an error is caught in a CATCH block with `as: "errorVar"`, the error object
 // contains several fields. ErrorMessage() provides a discoverable way to access
@@ -1143,14 +1144,14 @@ func Interpolate(parts ...string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("errorMessage", "${httpErr.message}")  // ❌ Old way - not discoverable
+//	SetVar("errorMessage", "${ .httpErr.message }")  // ❌ Old way - not discoverable
 //	SetVar("errorMessage", ErrorMessage("httpErr")) // ✅ New way - type-safe
 func ErrorMessage(errorVar string) string {
-	return fmt.Sprintf("${%s.message}", errorVar)
+	return fmt.Sprintf("${ .%s.message }", errorVar)
 }
 
 // ErrorCode returns a reference to the code field of a caught error.
-// This is a type-safe helper that replaces manual "${errorVar.code}" syntax.
+// This is a type-safe helper that replaces manual "${ .errorVar.code }" syntax.
 //
 // The error code is a machine-readable string that indicates the error type.
 // This is useful for logging or conditional logic based on error types.
@@ -1167,14 +1168,14 @@ func ErrorMessage(errorVar string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("errorCode", "${err.code}")  // ❌ Old way - not discoverable
+//	SetVar("errorCode", "${ .err.code }")  // ❌ Old way - not discoverable
 //	SetVar("errorCode", ErrorCode("err")) // ✅ New way - type-safe
 func ErrorCode(errorVar string) string {
-	return fmt.Sprintf("${%s.code}", errorVar)
+	return fmt.Sprintf("${ .%s.code }", errorVar)
 }
 
 // ErrorStackTrace returns a reference to the stackTrace field of a caught error.
-// This is a type-safe helper that replaces manual "${errorVar.stackTrace}" syntax.
+// This is a type-safe helper that replaces manual "${ .errorVar.stackTrace }" syntax.
 //
 // The stack trace provides debugging information about where the error occurred.
 // This is optional and may not be present for all error types.
@@ -1191,14 +1192,14 @@ func ErrorCode(errorVar string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("errorStackTrace", "${err.stackTrace}")  // ❌ Old way - not discoverable
+//	SetVar("errorStackTrace", "${ .err.stackTrace }")  // ❌ Old way - not discoverable
 //	SetVar("errorStackTrace", ErrorStackTrace("err")) // ✅ New way - type-safe
 func ErrorStackTrace(errorVar string) string {
-	return fmt.Sprintf("${%s.stackTrace}", errorVar)
+	return fmt.Sprintf("${ .%s.stackTrace }", errorVar)
 }
 
 // ErrorObject returns a reference to the entire caught error object.
-// This is a type-safe helper that replaces manual "${errorVar}" syntax.
+// This is a type-safe helper that replaces manual "${ .errorVar }" syntax.
 //
 // Use this when you want to pass the entire error object (with all fields)
 // to another task, such as logging or external error tracking services.
@@ -1220,17 +1221,17 @@ func ErrorStackTrace(errorVar string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	"error": "${err}"  // ❌ Old way - not discoverable
+//	"error": "${ .err }"  // ❌ Old way - not discoverable
 //	"error": ErrorObject("err") // ✅ New way - type-safe
 func ErrorObject(errorVar string) string {
-	return fmt.Sprintf("${%s}", errorVar)
+	return fmt.Sprintf("${ .%s }", errorVar)
 }
 
 // ============================================================================
 // Arithmetic Expression Builders - Common patterns for computed values
 // ============================================================================
 
-// Increment returns an expression that adds 1 to a variable.
+// Increment returns an expression that adds 1 to a context variable.
 // This is a high-level helper for the extremely common pattern of incrementing counters.
 //
 // Use this for retry counters, iteration counts, and other increment scenarios.
@@ -1243,7 +1244,7 @@ func ErrorObject(errorVar string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("retryCount", "${retryCount + 1}")  // ❌ Old way - not discoverable
+//	SetVar("retryCount", "${ $context.retryCount + 1 }")  // ❌ Old way - not discoverable
 //	SetVar("retryCount", Increment("retryCount")) // ✅ New way - type-safe
 //
 // Common use cases:
@@ -1252,10 +1253,10 @@ func ErrorObject(errorVar string) string {
 //   - Attempt tracking
 //   - Step numbering
 func Increment(varName string) string {
-	return fmt.Sprintf("${%s + 1}", varName)
+	return fmt.Sprintf("${ $context.%s + 1 }", varName)
 }
 
-// Decrement returns an expression that subtracts 1 from a variable.
+// Decrement returns an expression that subtracts 1 from a context variable.
 // This is a high-level helper for the common pattern of decrementing counters.
 //
 // Use this for countdown timers, remaining items, and other decrement scenarios.
@@ -1268,7 +1269,7 @@ func Increment(varName string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("remaining", "${remaining - 1}")  // ❌ Old way - not discoverable
+//	SetVar("remaining", "${ $context.remaining - 1 }")  // ❌ Old way - not discoverable
 //	SetVar("remaining", Decrement("remaining")) // ✅ New way - type-safe
 //
 // Common use cases:
@@ -1277,7 +1278,7 @@ func Increment(varName string) string {
 //   - Capacity tracking
 //   - Quota management
 func Decrement(varName string) string {
-	return fmt.Sprintf("${%s - 1}", varName)
+	return fmt.Sprintf("${ $context.%s - 1 }", varName)
 }
 
 // Expr provides an escape hatch for complex expressions that don't have dedicated helpers.
@@ -1287,23 +1288,25 @@ func Decrement(varName string) string {
 // This is the "progressive disclosure" pattern - simple things use helpers,
 // complex things use expressions directly.
 //
+// Note: When referencing context variables, use $context prefix in your expression.
+//
 // Example:
 //
-//	// Complex arithmetic
-//	workflow.SetVar("total", workflow.Expr("(price * quantity) + tax"))
+//	// Complex arithmetic with context variables
+//	workflow.SetVar("total", workflow.Expr("($context.price * $context.quantity) + $context.tax"))
 //
-//	// String concatenation
-//	workflow.SetVar("fullName", workflow.Expr("firstName + ' ' + lastName"))
+//	// String concatenation with context variables
+//	workflow.SetVar("fullName", workflow.Expr("$context.firstName + ' ' + $context.lastName"))
 //
-//	// Conditional expressions
-//	workflow.SetVar("status", workflow.Expr("score >= 90 ? 'A' : 'B'"))
+//	// Accessing response fields (use . prefix)
+//	workflow.SetVar("statusCode", workflow.Expr(".response.status"))
 //
 // Note: For simple cases, prefer dedicated helpers:
-//   - Use Increment("x") instead of Expr("x + 1")
-//   - Use VarRef("name") instead of Expr("name") for simple references
+//   - Use Increment("x") instead of Expr("$context.x + 1")
+//   - Use VarRef("name") instead of Expr("$context.name") for simple references
 //   - Use ErrorMessage("err") instead of Expr("err.message") for error fields
 func Expr(expression string) string {
-	return fmt.Sprintf("${%s}", expression)
+	return fmt.Sprintf("${ %s }", expression)
 }
 
 // ============================================================================
@@ -1317,11 +1320,11 @@ func Field(fieldPath string) string {
 	return fmt.Sprintf(".%s", fieldPath)
 }
 
-// Var returns a variable reference expression (without ${} wrapper) for use in conditions.
+// Var returns a context variable reference expression (without ${} wrapper) for use in conditions.
 // This is specifically for condition builders. For variable interpolation, use VarRef().
-// Example: Var("apiURL") returns "apiURL"
+// Example: Var("apiURL") returns "$context.apiURL"
 func Var(varName string) string {
-	return varName
+	return fmt.Sprintf("$context.%s", varName)
 }
 
 // Literal returns a literal value wrapped in quotes for use in conditions.
@@ -1337,67 +1340,67 @@ func Number(value interface{}) string {
 }
 
 // Equals builds an equality condition expression.
-// Example: Equals(Field("status"), Number(200)) generates "${.status == 200}"
+// Example: Equals(Field("status"), Number(200)) generates "${ .status == 200 }"
 func Equals(left, right string) string {
-	return fmt.Sprintf("${%s == %s}", left, right)
+	return fmt.Sprintf("${ %s == %s }", left, right)
 }
 
 // NotEquals builds an inequality condition expression.
-// Example: NotEquals(FieldRef("status"), "200") generates "${.status != 200}"
+// Example: NotEquals(Field("status"), Number(200)) generates "${ .status != 200 }"
 func NotEquals(left, right string) string {
-	return fmt.Sprintf("${%s != %s}", left, right)
+	return fmt.Sprintf("${ %s != %s }", left, right)
 }
 
 // GreaterThan builds a greater-than condition expression.
-// Example: GreaterThan(FieldRef("count"), "10") generates "${.count > 10}"
+// Example: GreaterThan(Field("count"), Number(10)) generates "${ .count > 10 }"
 func GreaterThan(left, right string) string {
-	return fmt.Sprintf("${%s > %s}", left, right)
+	return fmt.Sprintf("${ %s > %s }", left, right)
 }
 
 // GreaterThanOrEqual builds a greater-than-or-equal condition expression.
-// Example: GreaterThanOrEqual(FieldRef("status"), "500") generates "${.status >= 500}"
+// Example: GreaterThanOrEqual(Field("status"), Number(500)) generates "${ .status >= 500 }"
 func GreaterThanOrEqual(left, right string) string {
-	return fmt.Sprintf("${%s >= %s}", left, right)
+	return fmt.Sprintf("${ %s >= %s }", left, right)
 }
 
 // LessThan builds a less-than condition expression.
-// Example: LessThan(FieldRef("count"), "100") generates "${.count < 100}"
+// Example: LessThan(Field("count"), Number(100)) generates "${ .count < 100 }"
 func LessThan(left, right string) string {
-	return fmt.Sprintf("${%s < %s}", left, right)
+	return fmt.Sprintf("${ %s < %s }", left, right)
 }
 
 // LessThanOrEqual builds a less-than-or-equal condition expression.
-// Example: LessThanOrEqual(FieldRef("count"), "100") generates "${.count <= 100}"
+// Example: LessThanOrEqual(Field("count"), Number(100)) generates "${ .count <= 100 }"
 func LessThanOrEqual(left, right string) string {
-	return fmt.Sprintf("${%s <= %s}", left, right)
+	return fmt.Sprintf("${ %s <= %s }", left, right)
 }
 
 // And combines multiple conditions with logical AND.
-// Example: And(Equals(FieldRef("status"), "200"), Equals(FieldRef("type"), "success"))
+// Example: And(Equals(Field("status"), Number(200)), Equals(Field("type"), Literal("success")))
 func And(conditions ...string) string {
 	// Remove ${ and } wrappers from conditions for proper nesting
 	unwrapped := make([]string, len(conditions))
 	for i, cond := range conditions {
-		unwrapped[i] = strings.TrimPrefix(strings.TrimSuffix(cond, "}"), "${")
+		unwrapped[i] = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(cond), "}"), "${"))
 	}
-	return fmt.Sprintf("${%s}", strings.Join(unwrapped, " && "))
+	return fmt.Sprintf("${ %s }", strings.Join(unwrapped, " && "))
 }
 
 // Or combines multiple conditions with logical OR.
-// Example: Or(Equals(FieldRef("status"), "200"), Equals(FieldRef("status"), "201"))
+// Example: Or(Equals(Field("status"), Number(200)), Equals(Field("status"), Number(201)))
 func Or(conditions ...string) string {
 	// Remove ${ and } wrappers from conditions for proper nesting
 	unwrapped := make([]string, len(conditions))
 	for i, cond := range conditions {
-		unwrapped[i] = strings.TrimPrefix(strings.TrimSuffix(cond, "}"), "${")
+		unwrapped[i] = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(cond), "}"), "${"))
 	}
-	return fmt.Sprintf("${%s}", strings.Join(unwrapped, " || "))
+	return fmt.Sprintf("${ %s }", strings.Join(unwrapped, " || "))
 }
 
 // Not negates a condition.
-// Example: Not(Equals(FieldRef("status"), "200")) generates "${!(.status == 200)}"
+// Example: Not(Equals(Field("status"), Number(200))) generates "${ !(.status == 200) }"
 func Not(condition string) string {
 	// Remove ${ and } wrapper from condition for proper nesting
-	unwrapped := strings.TrimPrefix(strings.TrimSuffix(condition, "}"), "${")
-	return fmt.Sprintf("${!(%s)}", unwrapped)
+	unwrapped := strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(condition), "}"), "${"))
+	return fmt.Sprintf("${ !(%s) }", unwrapped)
 }
