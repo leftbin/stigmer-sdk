@@ -186,9 +186,9 @@ func TestExample07_BasicWorkflow(t *testing.T) {
 			t.Error("Workflow should have tasks")
 		}
 
-		// Should have 3 tasks: initialize, fetchData, processResponse
-		if len(workflow.Spec.Tasks) != 3 {
-			t.Errorf("Expected 3 tasks, got %d", len(workflow.Spec.Tasks))
+		// Should have 2 tasks: fetchData, processResponse (Phase 5.1 Pulumi-aligned pattern)
+		if len(workflow.Spec.Tasks) != 2 {
+			t.Errorf("Expected 2 tasks, got %d", len(workflow.Spec.Tasks))
 		}
 	})
 }
@@ -306,6 +306,104 @@ func TestExample11_WorkflowWithParallelExecution(t *testing.T) {
 		if len(workflow.Spec.Tasks) == 0 {
 			t.Error("Workflow should have tasks")
 		}
+	})
+}
+
+// TestExample08_AgentWithTypedContext tests the agent with typed context example
+func TestExample08_AgentWithTypedContext(t *testing.T) {
+	runExampleTest(t, "08_agent_with_typed_context.go", func(t *testing.T, outputDir string) {
+		manifestPath := filepath.Join(outputDir, "agent-manifest.pb")
+		assertFileExists(t, manifestPath)
+
+		var manifest agentv1.AgentManifest
+		readProtoManifest(t, manifestPath, &manifest)
+
+		if len(manifest.Agents) < 1 {
+			t.Fatal("Expected at least 1 agent")
+		}
+
+		agent := manifest.Agents[0]
+		if agent.Name != "code-reviewer" {
+			t.Errorf("Agent name = %v, want code-reviewer", agent.Name)
+		}
+
+		// Verify agent has description (uses typed context variable)
+		if agent.Description == "" {
+			t.Error("Agent should have description from typed context")
+		}
+
+		// This example demonstrates typed context with agent
+		// The key point is that typed context variables can be used for configuration
+		if agent.Instructions == "" {
+			t.Error("Agent should have instructions")
+		}
+		
+		// Verify agent has skills (demonstrates complete agent configuration)
+		if len(agent.Skills) == 0 {
+			t.Error("Agent should have skills")
+		}
+		
+		// Verify agent has MCP servers
+		if len(agent.McpServers) == 0 {
+			t.Error("Agent should have MCP servers")
+		}
+	})
+}
+
+// TestExample09_WorkflowAndAgentSharedContext tests the workflow and agent with shared context example
+func TestExample09_WorkflowAndAgentSharedContext(t *testing.T) {
+	runExampleTest(t, "09_workflow_and_agent_shared_context.go", func(t *testing.T, outputDir string) {
+		// This example creates BOTH workflow and agent manifests
+		workflowManifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+		agentManifestPath := filepath.Join(outputDir, "agent-manifest.pb")
+		
+		// Verify both manifests were created
+		assertFileExists(t, workflowManifestPath)
+		assertFileExists(t, agentManifestPath)
+
+		// Validate workflow manifest
+		var workflowManifest workflowv1.WorkflowManifest
+		readProtoManifest(t, workflowManifestPath, &workflowManifest)
+
+		if len(workflowManifest.Workflows) != 1 {
+			t.Fatalf("Expected 1 workflow, got %d", len(workflowManifest.Workflows))
+		}
+
+		workflow := workflowManifest.Workflows[0]
+		if workflow.Spec == nil || workflow.Spec.Document == nil {
+			t.Fatal("Workflow spec or document is nil")
+		}
+
+		if workflow.Spec.Document.Name != "fetch-and-analyze" {
+			t.Errorf("Workflow name = %v, want fetch-and-analyze", workflow.Spec.Document.Name)
+		}
+
+		// Validate agent manifest
+		var agentManifest agentv1.AgentManifest
+		readProtoManifest(t, agentManifestPath, &agentManifest)
+
+		if len(agentManifest.Agents) != 1 {
+			t.Fatalf("Expected 1 agent, got %d", len(agentManifest.Agents))
+		}
+
+		agent := agentManifest.Agents[0]
+		if agent.Name != "data-analyzer" {
+			t.Errorf("Agent name = %v, want data-analyzer", agent.Name)
+		}
+
+		// Verify workflow has tasks (demonstrating shared context usage)
+		if len(workflow.Spec.Tasks) == 0 {
+			t.Error("Workflow should have tasks using shared context variables")
+		}
+
+		// Verify agent has instructions (demonstrating shared context usage)
+		if agent.Instructions == "" {
+			t.Error("Agent should have instructions")
+		}
+		
+		// Both workflow and agent should be configured with shared context
+		// This example demonstrates that both can use the same context for configuration
+		// The key point is that both manifests are created successfully from the same context
 	})
 }
 

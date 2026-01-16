@@ -10,6 +10,15 @@ import (
 	"github.com/leftbin/stigmer-sdk/go/subagent"
 )
 
+// Context is a minimal interface that represents a stigmer context.
+// This allows the agent package to work with contexts without importing
+// the stigmer package (avoiding import cycles).
+//
+// The stigmer.Context type implements this interface.
+type Context interface {
+	RegisterAgent(*Agent)
+}
+
 // Agent represents an AI agent template with skills, MCP servers, and configuration.
 //
 // The Agent is the "template" layer - it defines the immutable logic and requirements
@@ -22,6 +31,16 @@ import (
 //	    agent.WithInstructions("Review code and suggest improvements"),
 //	    agent.WithDescription("AI code reviewer"),
 //	)
+//
+// Or use with typed context (recommended):
+//
+//	stigmer.Run(func(ctx *stigmer.Context) error {
+//	    ag, err := agent.NewWithContext(ctx,
+//	        agent.WithName("code-reviewer"),
+//	        agent.WithInstructions("Review code and suggest improvements"),
+//	    )
+//	    return err
+//	})
 type Agent struct {
 	// Name is the agent name (lowercase alphanumeric with hyphens, max 63 chars).
 	Name string
@@ -49,6 +68,9 @@ type Agent struct {
 
 	// EnvironmentVariables are environment variables required by the agent.
 	EnvironmentVariables []environment.Variable
+
+	// Context reference (optional, used for typed variable management)
+	ctx Context
 }
 
 // Option is a functional option for configuring an Agent.
@@ -74,6 +96,8 @@ type Option func(*Agent) error
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
+//
+// For agents using typed context, use NewWithContext() instead.
 func New(opts ...Option) (*Agent, error) {
 	a := &Agent{}
 
@@ -97,17 +121,61 @@ func New(opts ...Option) (*Agent, error) {
 	return a, nil
 }
 
+// NewWithContext creates a new Agent with a typed context for variable management.
+//
+// This is the recommended way to create agents when using typed context variables.
+// The agent is automatically registered with the provided context for synthesis.
+//
+// Required options:
+//   - WithName: agent name
+//   - WithInstructions: behavior instructions
+//
+// Example:
+//
+//	stigmer.Run(func(ctx *stigmer.Context) error {
+//	    ag, err := agent.NewWithContext(ctx,
+//	        agent.WithName("code-reviewer"),
+//	        agent.WithInstructions("Review code and suggest improvements"),
+//	    )
+//	    return err
+//	})
+func NewWithContext(ctx Context, opts ...Option) (*Agent, error) {
+	a := &Agent{
+		ctx: ctx,
+	}
+
+	// Apply all options
+	for _, opt := range opts {
+		if err := opt(a); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate the agent
+	if err := validate(a); err != nil {
+		return nil, err
+	}
+
+	// Register with context
+	ctx.RegisterAgent(a)
+
+	return a, nil
+}
+
 // WithName sets the agent name.
 //
 // The name must be lowercase alphanumeric with hyphens, max 63 characters.
 // This is a required field.
 //
-// Example:
+// Accepts either a string or a StringRef from context.
 //
-//	agent.WithName("code-reviewer")
-func WithName(name string) Option {
+// Examples:
+//
+//	agent.WithName("code-reviewer")                           // Legacy string
+//	agent.WithName(ctx.SetString("agentName", "reviewer"))    // Typed context
+func WithName(name interface{}) Option {
 	return func(a *Agent) error {
-		a.Name = name
+		a.Name = toExpression(name)
 		return nil
 	}
 }
@@ -117,12 +185,15 @@ func WithName(name string) Option {
 // Instructions must be between 10 and 10,000 characters.
 // This is a required field.
 //
-// Example:
+// Accepts either a string or a StringRef from context.
 //
-//	agent.WithInstructions("Review code and suggest improvements")
-func WithInstructions(instructions string) Option {
+// Examples:
+//
+//	agent.WithInstructions("Review code and suggest improvements")                    // Legacy string
+//	agent.WithInstructions(ctx.SetString("instructions", "Review code..."))          // Typed context
+func WithInstructions(instructions interface{}) Option {
 	return func(a *Agent) error {
-		a.Instructions = instructions
+		a.Instructions = toExpression(instructions)
 		return nil
 	}
 }
@@ -151,12 +222,15 @@ func WithInstructionsFromFile(path string) Option {
 //
 // Description is optional and must be max 500 characters.
 //
-// Example:
+// Accepts either a string or a StringRef from context.
 //
-//	agent.WithDescription("AI code reviewer")
-func WithDescription(description string) Option {
+// Examples:
+//
+//	agent.WithDescription("AI code reviewer")                                  // Legacy string
+//	agent.WithDescription(ctx.SetString("description", "AI reviewer"))         // Typed context
+func WithDescription(description interface{}) Option {
 	return func(a *Agent) error {
-		a.Description = description
+		a.Description = toExpression(description)
 		return nil
 	}
 }
@@ -166,12 +240,15 @@ func WithDescription(description string) Option {
 // The URL must be a valid HTTP/HTTPS URL.
 // This is an optional field.
 //
-// Example:
+// Accepts either a string or a StringRef from context.
 //
-//	agent.WithIconURL("https://example.com/icon.png")
-func WithIconURL(url string) Option {
+// Examples:
+//
+//	agent.WithIconURL("https://example.com/icon.png")                      // Legacy string
+//	agent.WithIconURL(ctx.SetString("iconURL", "https://..."))             // Typed context
+func WithIconURL(url interface{}) Option {
 	return func(a *Agent) error {
-		a.IconURL = url
+		a.IconURL = toExpression(url)
 		return nil
 	}
 }
@@ -180,12 +257,15 @@ func WithIconURL(url string) Option {
 //
 // This is an optional field.
 //
-// Example:
+// Accepts either a string or a StringRef from context.
 //
-//	agent.WithOrg("my-org")
-func WithOrg(org string) Option {
+// Examples:
+//
+//	agent.WithOrg("my-org")                                    // Legacy string
+//	agent.WithOrg(ctx.SetString("org", "my-org"))              // Typed context
+func WithOrg(org interface{}) Option {
 	return func(a *Agent) error {
-		a.Org = org
+		a.Org = toExpression(org)
 		return nil
 	}
 }

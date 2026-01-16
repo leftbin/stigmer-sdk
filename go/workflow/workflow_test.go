@@ -77,14 +77,13 @@ func TestWorkflow_New(t *testing.T) {
 			errMsg:  "version must be valid semver",
 		},
 		{
-			name: "no tasks",
+			name: "no tasks (allowed for Pulumi-style pattern)",
 			opts: []workflow.Option{
 				workflow.WithNamespace("test-namespace"),
 				workflow.WithName("test-workflow"),
 				workflow.WithVersion("1.0.0"),
 			},
-			wantErr: true,
-			errMsg:  "workflow must have at least one task",
+			wantErr: false, // Changed: now allowed to support wf.HttpGet() pattern
 		},
 	}
 

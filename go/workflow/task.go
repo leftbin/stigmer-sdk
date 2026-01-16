@@ -47,11 +47,124 @@ type Task struct {
 
 	// Flow control (which task executes next)
 	ThenTask string
+
+	// Explicit dependencies (optional, for cases where field references don't capture it)
+	// This is tracked automatically when using TaskFieldRef but can be set explicitly
+	Dependencies []string
 }
 
 // TaskConfig is a marker interface for task configurations.
 type TaskConfig interface {
 	isTaskConfig()
+}
+
+// ============================================================================
+// TaskFieldRef - Typed references to task output fields (Pulumi-style)
+// ============================================================================
+
+// TaskFieldRef represents a typed reference to a specific field in a task's output.
+// This enables Pulumi-style task output references where the origin is always clear.
+//
+// Example:
+//
+//	fetchTask := wf.HttpGet("fetch", apiURL)
+//	title := fetchTask.Field("title")  // Clear: title comes from fetchTask!
+//	processTask := wf.SetVars("process", "postTitle", title)
+//
+// This replaces magic string references:
+//
+//	workflow.FieldRef("title")  // ❌ Where does "title" come from? Unclear!
+//	fetchTask.Field("title")    // ✅ Clear origin - from fetchTask
+type TaskFieldRef struct {
+	taskName  string // Name of the task this field comes from
+	fieldName string // Name of the field in the task output
+}
+
+// Expression returns the JQ expression for this field reference.
+// Implements the Ref interface.
+func (r TaskFieldRef) Expression() string {
+	// Reference format: ${ $context.taskName.fieldName }
+	// This assumes the task has exported its output to context
+	return fmt.Sprintf("${ $context.%s.%s }", r.taskName, r.fieldName)
+}
+
+// Name returns a human-readable name for this reference.
+// Implements the Ref interface.
+func (r TaskFieldRef) Name() string {
+	return fmt.Sprintf("%s.%s", r.taskName, r.fieldName)
+}
+
+// TaskName returns the name of the source task.
+// This is used for dependency tracking.
+func (r TaskFieldRef) TaskName() string {
+	return r.taskName
+}
+
+// FieldName returns the name of the field being referenced.
+func (r TaskFieldRef) FieldName() string {
+	return r.fieldName
+}
+
+// Field creates a typed reference to an output field of this task.
+// This enables Pulumi-style output references with clear origins.
+//
+// Example:
+//
+//	fetchTask := wf.HttpGet("fetch", endpoint)
+//	title := fetchTask.Field("title")  // Clear: from fetchTask
+//	body := fetchTask.Field("body")    // Clear: from fetchTask
+//
+//	processTask := wf.SetVars("process",
+//	    "postTitle", title,
+//	    "postBody", body,
+//	)
+//	// Dependencies are implicit - processTask depends on fetchTask!
+//
+// This replaces the old pattern:
+//
+//	workflow.FieldRef("title")  // ❌ Magic string - where's it from?
+//	fetchTask.Field("title")    // ✅ Clear origin!
+func (t *Task) Field(fieldName string) TaskFieldRef {
+	return TaskFieldRef{
+		taskName:  t.Name,
+		fieldName: fieldName,
+	}
+}
+
+// DependsOn adds explicit dependencies to this task.
+// This is the escape hatch for when implicit dependencies (through field references)
+// don't capture the relationship. Like Pulumi's pulumi.DependsOn().
+//
+// In most cases, dependencies are inferred automatically when you use TaskFieldRef.
+// Only use DependsOn() when:
+//  - Side effects matter (task A must run before task B, but B doesn't use A's output)
+//  - Ordering is important for reasons not captured by data flow
+//
+// Example:
+//
+//	// Implicit dependency (preferred):
+//	processTask := wf.SetVars("process",
+//	    "data", fetchTask.Field("body"),  // Automatic dependency!
+//	)
+//
+//	// Explicit dependency (escape hatch):
+//	cleanupTask := wf.SetVars("cleanup", ...)
+//	cleanupTask.DependsOn(processTask)  // Cleanup must run after process
+func (t *Task) DependsOn(tasks ...*Task) *Task {
+	for _, task := range tasks {
+		// Check if already in dependencies
+		found := false
+		for _, dep := range t.Dependencies {
+			if dep == task.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Dependencies = append(t.Dependencies, task.Name)
+		}
+	}
+	return t
 }
 
 // Export sets the export directive for this task using a low-level expression.
@@ -74,7 +187,7 @@ func (t *Task) ExportAll() *Task {
 // This is a high-level helper that replaces Export("${.field}").
 // Example: HttpCallTask("fetch",...).ExportField("count")
 func (t *Task) ExportField(fieldName string) *Task {
-	t.ExportAs = fmt.Sprintf("${.%s}", fieldName)
+	t.ExportAs = fmt.Sprintf("${ $context.%s }", fieldName)
 	return t
 }
 
@@ -126,6 +239,11 @@ type SetTaskConfig struct {
 	// Variables to set in workflow state.
 	// Keys are variable names, values can be literals or expressions.
 	Variables map[string]string
+	
+	// ImplicitDependencies tracks task dependencies discovered through TaskFieldRef usage.
+	// This is used during task creation to populate the task's Dependencies field.
+	// Map key is the task name, value is always true (set semantics).
+	ImplicitDependencies map[string]bool
 }
 
 func (*SetTaskConfig) isTaskConfig() {}
@@ -133,6 +251,13 @@ func (*SetTaskConfig) isTaskConfig() {}
 // SetTask creates a new SET task.
 //
 // SET tasks assign variables in workflow state.
+//
+// When using TaskFieldRef values, dependencies are automatically tracked:
+//
+//	fetchTask := wf.HttpGet("fetch", endpoint)
+//	processTask := workflow.SetTask("process",
+//	    workflow.SetVar("title", fetchTask.Field("title")),  // Implicit dependency!
+//	)
 //
 // Example:
 //
@@ -142,28 +267,57 @@ func (*SetTaskConfig) isTaskConfig() {}
 //	)
 func SetTask(name string, opts ...SetTaskOption) *Task {
 	cfg := &SetTaskConfig{
-		Variables: make(map[string]string),
+		Variables:            make(map[string]string),
+		ImplicitDependencies: make(map[string]bool),
 	}
 
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	return &Task{
-		Name:   name,
-		Kind:   TaskKindSet,
-		Config: cfg,
+	// Create task
+	task := &Task{
+		Name:         name,
+		Kind:         TaskKindSet,
+		Config:       cfg,
+		Dependencies: []string{},
 	}
+
+	// Propagate implicit dependencies to task
+	for taskName := range cfg.ImplicitDependencies {
+		task.Dependencies = append(task.Dependencies, taskName)
+	}
+
+	return task
 }
 
 // SetTaskOption is a functional option for configuring SET tasks.
 type SetTaskOption func(*SetTaskConfig)
 
 // SetVar adds a variable to a SET task.
+// Accepts either a string or a Ref type for the value.
 // For better type safety, consider using SetInt, SetString, SetBool instead.
-func SetVar(key, value string) SetTaskOption {
+//
+// When a TaskFieldRef is used, the dependency is automatically tracked.
+//
+// Examples:
+//
+//	SetVar("apiURL", "https://api.example.com")     // Legacy string
+//	SetVar("apiURL", ctx.SetString("url", "..."))   // Typed context
+//	SetVar("endpoint", apiURL.Concat("/users"))     // StringRef transformation
+//	SetVar("title", fetchTask.Field("title"))       // Implicit dependency on fetchTask!
+func SetVar(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = value
+		cfg.Variables[key] = toExpression(value)
+		
+		// Track implicit dependency if this is a TaskFieldRef
+		if fieldRef, ok := value.(TaskFieldRef); ok {
+			// Store dependency info in config for later tracking
+			if cfg.ImplicitDependencies == nil {
+				cfg.ImplicitDependencies = make(map[string]bool)
+			}
+			cfg.ImplicitDependencies[fieldRef.TaskName()] = true
+		}
 	}
 }
 
@@ -177,36 +331,57 @@ func SetVars(vars map[string]string) SetTaskOption {
 }
 
 // SetInt adds an integer variable to a SET task with automatic type conversion.
+// Accepts either an int or an IntRef from context.
 // This is a high-level helper that provides better UX than SetVar("count", "0").
-// Example: SetTask("init", SetInt("count", 0))
-func SetInt(key string, value int) SetTaskOption {
+//
+// Examples:
+//
+//	SetInt("count", 0)                          // Legacy int
+//	SetInt("count", ctx.SetInt("retries", 3))   // Typed context
+//	SetInt("count", counter.Add(1))             // IntRef transformation
+func SetInt(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = fmt.Sprintf("%d", value)
+		cfg.Variables[key] = toExpression(value)
 	}
 }
 
 // SetString adds a string variable to a SET task.
+// Accepts either a string or a StringRef from context.
 // This is semantically clearer than SetVar for string values.
-// Example: SetTask("init", SetString("status", "pending"))
-func SetString(key, value string) SetTaskOption {
+//
+// Examples:
+//
+//	SetString("status", "pending")                      // Legacy string
+//	SetString("status", ctx.SetString("state", "..."))  // Typed context
+//	SetString("url", apiURL.Concat("/users"))           // StringRef transformation
+func SetString(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = value
+		cfg.Variables[key] = toExpression(value)
 	}
 }
 
 // SetBool adds a boolean variable to a SET task with automatic type conversion.
-// Example: SetTask("init", SetBool("enabled", true))
-func SetBool(key string, value bool) SetTaskOption {
+// Accepts either a bool or a BoolRef from context.
+//
+// Examples:
+//
+//	SetBool("enabled", true)                       // Legacy bool
+//	SetBool("enabled", ctx.SetBool("isProd", true)) // Typed context
+func SetBool(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = fmt.Sprintf("%t", value)
+		cfg.Variables[key] = toExpression(value)
 	}
 }
 
 // SetFloat adds a float variable to a SET task with automatic type conversion.
-// Example: SetTask("init", SetFloat("price", 99.99))
-func SetFloat(key string, value float64) SetTaskOption {
+// Accepts either a float or numeric value.
+//
+// Example:
+//
+//	SetFloat("price", 99.99)
+func SetFloat(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
-		cfg.Variables[key] = fmt.Sprintf("%f", value)
+		cfg.Variables[key] = toExpression(value)
 	}
 }
 
@@ -221,6 +396,9 @@ type HttpCallTaskConfig struct {
 	Headers        map[string]string // HTTP headers
 	Body           map[string]any    // Request body (JSON)
 	TimeoutSeconds int32             // Request timeout in seconds
+	
+	// ImplicitDependencies tracks task dependencies discovered through TaskFieldRef usage.
+	ImplicitDependencies map[string]bool
 }
 
 func (*HttpCallTaskConfig) isTaskConfig() {}
@@ -238,20 +416,30 @@ func (*HttpCallTaskConfig) isTaskConfig() {}
 //	)
 func HttpCallTask(name string, opts ...HttpCallTaskOption) *Task {
 	cfg := &HttpCallTaskConfig{
-		Headers:        make(map[string]string),
-		Body:           make(map[string]any),
-		TimeoutSeconds: 30, // default timeout
+		Headers:              make(map[string]string),
+		Body:                 make(map[string]any),
+		TimeoutSeconds:       30, // default timeout
+		ImplicitDependencies: make(map[string]bool),
 	}
 
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	return &Task{
-		Name:   name,
-		Kind:   TaskKindHttpCall,
-		Config: cfg,
+	// Create task
+	task := &Task{
+		Name:         name,
+		Kind:         TaskKindHttpCall,
+		Config:       cfg,
+		Dependencies: []string{},
 	}
+
+	// Propagate implicit dependencies to task
+	for taskName := range cfg.ImplicitDependencies {
+		task.Dependencies = append(task.Dependencies, taskName)
+	}
+
+	return task
 }
 
 // HttpCallTaskOption is a functional option for configuring HTTP_CALL tasks.
@@ -324,17 +512,55 @@ func WithHTTPOptions() HttpCallTaskOption {
 }
 
 // WithURI sets the HTTP URI.
-func WithURI(uri string) HttpCallTaskOption {
+// Accepts either a string or a Ref type (e.g., StringRef from context, TaskFieldRef).
+//
+// When a TaskFieldRef is used, the dependency is automatically tracked.
+//
+// Examples:
+//
+//	WithURI("https://api.example.com")                     // Legacy string
+//	WithURI(ctx.SetString("apiURL", "https://..."))        // Typed context
+//	WithURI(apiURL.Concat("/users"))                       // StringRef transformation
+//	WithURI(fetchTask.Field("nextURL"))                    // Implicit dependency on fetchTask!
+func WithURI(uri interface{}) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
-		cfg.URI = uri
+		cfg.URI = toExpression(uri)
+		
+		// Track implicit dependency if this is a TaskFieldRef
+		if fieldRef, ok := uri.(TaskFieldRef); ok {
+			if cfg.ImplicitDependencies == nil {
+				cfg.ImplicitDependencies = make(map[string]bool)
+			}
+			cfg.ImplicitDependencies[fieldRef.TaskName()] = true
+		}
 	}
 }
 
 // WithHeader adds an HTTP header.
-func WithHeader(key, value string) HttpCallTaskOption {
+// Accepts either strings or Ref types for both key and value.
+//
+// Examples:
+//
+//	WithHeader("Content-Type", "application/json")                // Legacy strings
+//	WithHeader("Authorization", ctx.SetSecret("token", "..."))    // Secret ref
+//	WithHeader("Authorization", token.Prepend("Bearer "))         // StringRef transformation
+func WithHeader(key string, value interface{}) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
-		cfg.Headers[key] = value
+		cfg.Headers[key] = toExpression(value)
 	}
+}
+
+// Header is a convenience alias for WithHeader for cleaner syntax.
+// Use this in the new Pulumi-style builders for brevity.
+//
+// Example:
+//
+//	wf.HttpGet("fetch", endpoint,
+//	    workflow.Header("Content-Type", "application/json"),  // Clean!
+//	    workflow.Header("Authorization", token),
+//	)
+func Header(key string, value interface{}) HttpCallTaskOption {
+	return WithHeader(key, value)
 }
 
 // WithHeaders adds multiple HTTP headers.
@@ -354,10 +580,28 @@ func WithBody(body map[string]any) HttpCallTaskOption {
 }
 
 // WithTimeout sets the request timeout in seconds.
-func WithTimeout(seconds int32) HttpCallTaskOption {
+// Accepts either an int or an IntRef from context.
+//
+// Examples:
+//
+//	WithTimeout(30)                                // Legacy int
+//	WithTimeout(ctx.SetInt("timeout", 30))         // Typed context
+func WithTimeout(seconds interface{}) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
-		cfg.TimeoutSeconds = seconds
+		cfg.TimeoutSeconds = toInt32(seconds)
 	}
+}
+
+// Timeout is a convenience alias for WithTimeout for cleaner syntax.
+// Use this in the new Pulumi-style builders for brevity.
+//
+// Example:
+//
+//	wf.HttpGet("fetch", endpoint,
+//	    workflow.Timeout(30),  // Clean!
+//	)
+func Timeout(seconds interface{}) HttpCallTaskOption {
+	return WithTimeout(seconds)
 }
 
 // ============================================================================
@@ -402,16 +646,28 @@ func GrpcCallTask(name string, opts ...GrpcCallTaskOption) *Task {
 type GrpcCallTaskOption func(*GrpcCallTaskConfig)
 
 // WithService sets the gRPC service name.
-func WithService(service string) GrpcCallTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithService("UserService")                        // Legacy string
+//	WithService(ctx.SetString("service", "..."))      // Typed context
+func WithService(service interface{}) GrpcCallTaskOption {
 	return func(cfg *GrpcCallTaskConfig) {
-		cfg.Service = service
+		cfg.Service = toExpression(service)
 	}
 }
 
 // WithGrpcMethod sets the gRPC method name.
-func WithGrpcMethod(method string) GrpcCallTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithGrpcMethod("GetUser")                         // Legacy string
+//	WithGrpcMethod(ctx.SetString("method", "..."))    // Typed context
+func WithGrpcMethod(method interface{}) GrpcCallTaskOption {
 	return func(cfg *GrpcCallTaskConfig) {
-		cfg.Method = method
+		cfg.Method = toExpression(method)
 	}
 }
 
@@ -552,9 +808,15 @@ func ForTask(name string, opts ...ForTaskOption) *Task {
 type ForTaskOption func(*ForTaskConfig)
 
 // WithIn sets the collection expression.
-func WithIn(expr string) ForTaskOption {
+// Accepts either a string expression or a Ref from context.
+//
+// Examples:
+//
+//	WithIn("${.items}")                              // Legacy expression
+//	WithIn(ctx.SetObject("items", [...]))            // Typed context
+func WithIn(expr interface{}) ForTaskOption {
 	return func(cfg *ForTaskConfig) {
-		cfg.In = expr
+		cfg.In = toExpression(expr)
 	}
 }
 
@@ -740,9 +1002,15 @@ func ListenTask(name string, opts ...ListenTaskOption) *Task {
 type ListenTaskOption func(*ListenTaskConfig)
 
 // WithEvent sets the event to listen for.
-func WithEvent(event string) ListenTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithEvent("approval.granted")                        // Legacy string
+//	WithEvent(ctx.SetString("eventName", "..."))         // Typed context
+func WithEvent(event interface{}) ListenTaskOption {
 	return func(cfg *ListenTaskConfig) {
-		cfg.Event = event
+		cfg.Event = toExpression(event)
 	}
 }
 
@@ -782,18 +1050,19 @@ func WaitTask(name string, opts ...WaitTaskOption) *Task {
 type WaitTaskOption func(*WaitTaskConfig)
 
 // WithDuration sets the wait duration.
-// Accepts both string format and type-safe duration helpers.
+// Accepts string format, duration helpers, or Ref types.
 //
 // String format examples: "5s", "1m", "1h", "1d"
 //
-// For better type safety and IDE support, consider using duration helpers:
+// Examples:
 //
-//	workflow.WithDuration(workflow.Seconds(5))   // Type-safe
-//	workflow.WithDuration(workflow.Minutes(30))  // Discoverable
-//	workflow.WithDuration("5s")                  // Also valid
-func WithDuration(duration string) WaitTaskOption {
+//	workflow.WithDuration(workflow.Seconds(5))              // Type-safe helper
+//	workflow.WithDuration(workflow.Minutes(30))             // Discoverable
+//	workflow.WithDuration("5s")                             // Legacy string
+//	workflow.WithDuration(ctx.SetString("wait", "10s"))     // Typed context
+func WithDuration(duration interface{}) WaitTaskOption {
 	return func(cfg *WaitTaskConfig) {
-		cfg.Duration = duration
+		cfg.Duration = toExpression(duration)
 	}
 }
 
@@ -912,9 +1181,15 @@ func CallActivityTask(name string, opts ...CallActivityTaskOption) *Task {
 type CallActivityTaskOption func(*CallActivityTaskConfig)
 
 // WithActivity sets the activity name.
-func WithActivity(activity string) CallActivityTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithActivity("DataProcessor")                        // Legacy string
+//	WithActivity(ctx.SetString("activity", "..."))       // Typed context
+func WithActivity(activity interface{}) CallActivityTaskOption {
 	return func(cfg *CallActivityTaskConfig) {
-		cfg.Activity = activity
+		cfg.Activity = toExpression(activity)
 	}
 }
 
@@ -966,16 +1241,28 @@ func RaiseTask(name string, opts ...RaiseTaskOption) *Task {
 type RaiseTaskOption func(*RaiseTaskConfig)
 
 // WithError sets the error type.
-func WithError(errorType string) RaiseTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithError("ValidationError")                         // Legacy string
+//	WithError(ctx.SetString("errorType", "..."))         // Typed context
+func WithError(errorType interface{}) RaiseTaskOption {
 	return func(cfg *RaiseTaskConfig) {
-		cfg.Error = errorType
+		cfg.Error = toExpression(errorType)
 	}
 }
 
 // WithErrorMessage sets the error message.
-func WithErrorMessage(message string) RaiseTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithErrorMessage("Invalid input")                    // Legacy string
+//	WithErrorMessage(ctx.SetString("errMsg", "..."))     // Typed context
+func WithErrorMessage(message interface{}) RaiseTaskOption {
 	return func(cfg *RaiseTaskConfig) {
-		cfg.Message = message
+		cfg.Message = toExpression(message)
 	}
 }
 
@@ -1026,9 +1313,15 @@ func RunTask(name string, opts ...RunTaskOption) *Task {
 type RunTaskOption func(*RunTaskConfig)
 
 // WithWorkflow sets the sub-workflow name.
-func WithWorkflow(workflow string) RunTaskOption {
+// Accepts either a string or a StringRef from context.
+//
+// Examples:
+//
+//	WithWorkflow("data-processor")                       // Legacy string
+//	WithWorkflow(ctx.SetString("workflow", "..."))       // Typed context
+func WithWorkflow(workflow interface{}) RunTaskOption {
 	return func(cfg *RunTaskConfig) {
-		cfg.WorkflowName = workflow
+		cfg.WorkflowName = toExpression(workflow)
 	}
 }
 
@@ -1043,29 +1336,82 @@ func WithWorkflowInput(input map[string]any) RunTaskOption {
 // Variable Interpolation Helpers
 // ============================================================================
 
-// VarRef creates a reference to a workflow variable.
-// This is a high-level helper that replaces manual "${varName}" syntax.
-// Example: WithURI(VarRef("apiURL") + "/data") instead of WithURI("${apiURL}/data")
+// VarRef creates a reference to a workflow variable from context.
+// Variables set via SetTask are stored in the workflow context and must be
+// referenced using $context in JQ expressions.
+//
+// Example: WithURI(Interpolate(VarRef("apiURL"), "/data"))
+// Generates: ${ $context.apiURL + "/data" }
+//
+// Note: This is for variables set in the workflow (via set: tasks).
+// For environment variables, use a different helper (future).
 func VarRef(varName string) string {
-	return fmt.Sprintf("${%s}", varName)
+	return fmt.Sprintf("${ $context.%s }", varName)
 }
 
 // FieldRef creates a reference to a field in the current context.
 // This is a high-level helper that replaces manual "${.field}" syntax.
-// Example: SetVar("count", FieldRef("count")) instead of SetVar("count", "${.count}")
+// Example: SetVar("count", FieldRef("count")) instead of SetVar("count", "${ $context.count }")
 func FieldRef(fieldPath string) string {
-	return fmt.Sprintf("${.%s}", fieldPath)
+	return fmt.Sprintf("${ $context.%s }", fieldPath)
 }
 
-// Interpolate combines static text with variable references.
-// This provides a cleaner way to build strings with variable interpolation.
-// Example: Interpolate(VarRef("apiURL"), "/data") instead of "${apiURL}/data"
+// Interpolate combines static text with variable references into a valid expression.
+// 
+// When mixing expressions (${ ... }) with static strings, this creates a proper
+// JQ expression using concatenation syntax.
+//
+// Examples:
+//   - Interpolate(VarRef("apiURL"), "/data") 
+//     → ${ $context.apiURL + "/data" } ✅
+//   - Interpolate("Bearer ", VarRef("token"))
+//     → ${ "Bearer " + $context.token } ✅
+//   - Interpolate("https://", VarRef("domain"), "/api/v1")
+//     → ${ "https://" + $context.domain + "/api/v1" } ✅
+//
+// Special cases:
+//   - Interpolate(VarRef("url")) → ${ $context.url } (single expression, no concatenation)
+//   - Interpolate("https://api.example.com") → https://api.example.com (plain string)
 func Interpolate(parts ...string) string {
-	result := ""
-	for _, part := range parts {
-		result += part
+	if len(parts) == 0 {
+		return ""
 	}
-	return result
+	
+	// Single part - return as-is
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	
+	// Check if any part contains an expression (starts with ${)
+	hasExpression := false
+	for _, part := range parts {
+		if strings.HasPrefix(part, "${") {
+			hasExpression = true
+			break
+		}
+	}
+	
+	// If no expressions, just concatenate as plain string
+	if !hasExpression {
+		return strings.Join(parts, "")
+	}
+	
+	// Build expression with proper concatenation
+	exprParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.HasPrefix(part, "${") && strings.HasSuffix(part, "}") {
+			// Extract expression content (remove ${ and })
+			// Handle both formats: "${...}" and "${ ... }" (with spaces)
+			expr := strings.TrimSpace(part[2 : len(part)-1])
+			exprParts = append(exprParts, expr)
+		} else {
+			// Quote static strings
+			exprParts = append(exprParts, fmt.Sprintf("\"%s\"", part))
+		}
+	}
+	
+	// Join with + operator and wrap in ${ }
+	return fmt.Sprintf("${ %s }", strings.Join(exprParts, " + "))
 }
 
 // ============================================================================
@@ -1073,7 +1419,7 @@ func Interpolate(parts ...string) string {
 // ============================================================================
 
 // ErrorMessage returns a reference to the message field of a caught error.
-// This is a type-safe helper that replaces manual "${errorVar.message}" syntax.
+// This is a type-safe helper that replaces manual "${ .errorVar.message }" syntax.
 //
 // When an error is caught in a CATCH block with `as: "errorVar"`, the error object
 // contains several fields. ErrorMessage() provides a discoverable way to access
@@ -1091,14 +1437,14 @@ func Interpolate(parts ...string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("errorMessage", "${httpErr.message}")  // ❌ Old way - not discoverable
+//	SetVar("errorMessage", "${ .httpErr.message }")  // ❌ Old way - not discoverable
 //	SetVar("errorMessage", ErrorMessage("httpErr")) // ✅ New way - type-safe
 func ErrorMessage(errorVar string) string {
-	return fmt.Sprintf("${%s.message}", errorVar)
+	return fmt.Sprintf("${ .%s.message }", errorVar)
 }
 
 // ErrorCode returns a reference to the code field of a caught error.
-// This is a type-safe helper that replaces manual "${errorVar.code}" syntax.
+// This is a type-safe helper that replaces manual "${ .errorVar.code }" syntax.
 //
 // The error code is a machine-readable string that indicates the error type.
 // This is useful for logging or conditional logic based on error types.
@@ -1115,14 +1461,14 @@ func ErrorMessage(errorVar string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("errorCode", "${err.code}")  // ❌ Old way - not discoverable
+//	SetVar("errorCode", "${ .err.code }")  // ❌ Old way - not discoverable
 //	SetVar("errorCode", ErrorCode("err")) // ✅ New way - type-safe
 func ErrorCode(errorVar string) string {
-	return fmt.Sprintf("${%s.code}", errorVar)
+	return fmt.Sprintf("${ .%s.code }", errorVar)
 }
 
 // ErrorStackTrace returns a reference to the stackTrace field of a caught error.
-// This is a type-safe helper that replaces manual "${errorVar.stackTrace}" syntax.
+// This is a type-safe helper that replaces manual "${ .errorVar.stackTrace }" syntax.
 //
 // The stack trace provides debugging information about where the error occurred.
 // This is optional and may not be present for all error types.
@@ -1139,14 +1485,14 @@ func ErrorCode(errorVar string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("errorStackTrace", "${err.stackTrace}")  // ❌ Old way - not discoverable
+//	SetVar("errorStackTrace", "${ .err.stackTrace }")  // ❌ Old way - not discoverable
 //	SetVar("errorStackTrace", ErrorStackTrace("err")) // ✅ New way - type-safe
 func ErrorStackTrace(errorVar string) string {
-	return fmt.Sprintf("${%s.stackTrace}", errorVar)
+	return fmt.Sprintf("${ .%s.stackTrace }", errorVar)
 }
 
 // ErrorObject returns a reference to the entire caught error object.
-// This is a type-safe helper that replaces manual "${errorVar}" syntax.
+// This is a type-safe helper that replaces manual "${ .errorVar }" syntax.
 //
 // Use this when you want to pass the entire error object (with all fields)
 // to another task, such as logging or external error tracking services.
@@ -1168,17 +1514,17 @@ func ErrorStackTrace(errorVar string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	"error": "${err}"  // ❌ Old way - not discoverable
+//	"error": "${ .err }"  // ❌ Old way - not discoverable
 //	"error": ErrorObject("err") // ✅ New way - type-safe
 func ErrorObject(errorVar string) string {
-	return fmt.Sprintf("${%s}", errorVar)
+	return fmt.Sprintf("${ .%s }", errorVar)
 }
 
 // ============================================================================
 // Arithmetic Expression Builders - Common patterns for computed values
 // ============================================================================
 
-// Increment returns an expression that adds 1 to a variable.
+// Increment returns an expression that adds 1 to a context variable.
 // This is a high-level helper for the extremely common pattern of incrementing counters.
 //
 // Use this for retry counters, iteration counts, and other increment scenarios.
@@ -1191,7 +1537,7 @@ func ErrorObject(errorVar string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("retryCount", "${retryCount + 1}")  // ❌ Old way - not discoverable
+//	SetVar("retryCount", "${ $context.retryCount + 1 }")  // ❌ Old way - not discoverable
 //	SetVar("retryCount", Increment("retryCount")) // ✅ New way - type-safe
 //
 // Common use cases:
@@ -1200,10 +1546,10 @@ func ErrorObject(errorVar string) string {
 //   - Attempt tracking
 //   - Step numbering
 func Increment(varName string) string {
-	return fmt.Sprintf("${%s + 1}", varName)
+	return fmt.Sprintf("${ $context.%s + 1 }", varName)
 }
 
-// Decrement returns an expression that subtracts 1 from a variable.
+// Decrement returns an expression that subtracts 1 from a context variable.
 // This is a high-level helper for the common pattern of decrementing counters.
 //
 // Use this for countdown timers, remaining items, and other decrement scenarios.
@@ -1216,7 +1562,7 @@ func Increment(varName string) string {
 //
 // This replaces the old string-based syntax:
 //
-//	SetVar("remaining", "${remaining - 1}")  // ❌ Old way - not discoverable
+//	SetVar("remaining", "${ $context.remaining - 1 }")  // ❌ Old way - not discoverable
 //	SetVar("remaining", Decrement("remaining")) // ✅ New way - type-safe
 //
 // Common use cases:
@@ -1225,7 +1571,7 @@ func Increment(varName string) string {
 //   - Capacity tracking
 //   - Quota management
 func Decrement(varName string) string {
-	return fmt.Sprintf("${%s - 1}", varName)
+	return fmt.Sprintf("${ $context.%s - 1 }", varName)
 }
 
 // Expr provides an escape hatch for complex expressions that don't have dedicated helpers.
@@ -1235,23 +1581,25 @@ func Decrement(varName string) string {
 // This is the "progressive disclosure" pattern - simple things use helpers,
 // complex things use expressions directly.
 //
+// Note: When referencing context variables, use $context prefix in your expression.
+//
 // Example:
 //
-//	// Complex arithmetic
-//	workflow.SetVar("total", workflow.Expr("(price * quantity) + tax"))
+//	// Complex arithmetic with context variables
+//	workflow.SetVar("total", workflow.Expr("($context.price * $context.quantity) + $context.tax"))
 //
-//	// String concatenation
-//	workflow.SetVar("fullName", workflow.Expr("firstName + ' ' + lastName"))
+//	// String concatenation with context variables
+//	workflow.SetVar("fullName", workflow.Expr("$context.firstName + ' ' + $context.lastName"))
 //
-//	// Conditional expressions
-//	workflow.SetVar("status", workflow.Expr("score >= 90 ? 'A' : 'B'"))
+//	// Accessing response fields (use . prefix)
+//	workflow.SetVar("statusCode", workflow.Expr(".response.status"))
 //
 // Note: For simple cases, prefer dedicated helpers:
-//   - Use Increment("x") instead of Expr("x + 1")
-//   - Use VarRef("name") instead of Expr("name") for simple references
+//   - Use Increment("x") instead of Expr("$context.x + 1")
+//   - Use VarRef("name") instead of Expr("$context.name") for simple references
 //   - Use ErrorMessage("err") instead of Expr("err.message") for error fields
 func Expr(expression string) string {
-	return fmt.Sprintf("${%s}", expression)
+	return fmt.Sprintf("${ %s }", expression)
 }
 
 // ============================================================================
@@ -1265,11 +1613,11 @@ func Field(fieldPath string) string {
 	return fmt.Sprintf(".%s", fieldPath)
 }
 
-// Var returns a variable reference expression (without ${} wrapper) for use in conditions.
+// Var returns a context variable reference expression (without ${} wrapper) for use in conditions.
 // This is specifically for condition builders. For variable interpolation, use VarRef().
-// Example: Var("apiURL") returns "apiURL"
+// Example: Var("apiURL") returns "$context.apiURL"
 func Var(varName string) string {
-	return varName
+	return fmt.Sprintf("$context.%s", varName)
 }
 
 // Literal returns a literal value wrapped in quotes for use in conditions.
@@ -1285,67 +1633,67 @@ func Number(value interface{}) string {
 }
 
 // Equals builds an equality condition expression.
-// Example: Equals(Field("status"), Number(200)) generates "${.status == 200}"
+// Example: Equals(Field("status"), Number(200)) generates "${ .status == 200 }"
 func Equals(left, right string) string {
-	return fmt.Sprintf("${%s == %s}", left, right)
+	return fmt.Sprintf("${ %s == %s }", left, right)
 }
 
 // NotEquals builds an inequality condition expression.
-// Example: NotEquals(FieldRef("status"), "200") generates "${.status != 200}"
+// Example: NotEquals(Field("status"), Number(200)) generates "${ .status != 200 }"
 func NotEquals(left, right string) string {
-	return fmt.Sprintf("${%s != %s}", left, right)
+	return fmt.Sprintf("${ %s != %s }", left, right)
 }
 
 // GreaterThan builds a greater-than condition expression.
-// Example: GreaterThan(FieldRef("count"), "10") generates "${.count > 10}"
+// Example: GreaterThan(Field("count"), Number(10)) generates "${ .count > 10 }"
 func GreaterThan(left, right string) string {
-	return fmt.Sprintf("${%s > %s}", left, right)
+	return fmt.Sprintf("${ %s > %s }", left, right)
 }
 
 // GreaterThanOrEqual builds a greater-than-or-equal condition expression.
-// Example: GreaterThanOrEqual(FieldRef("status"), "500") generates "${.status >= 500}"
+// Example: GreaterThanOrEqual(Field("status"), Number(500)) generates "${ .status >= 500 }"
 func GreaterThanOrEqual(left, right string) string {
-	return fmt.Sprintf("${%s >= %s}", left, right)
+	return fmt.Sprintf("${ %s >= %s }", left, right)
 }
 
 // LessThan builds a less-than condition expression.
-// Example: LessThan(FieldRef("count"), "100") generates "${.count < 100}"
+// Example: LessThan(Field("count"), Number(100)) generates "${ .count < 100 }"
 func LessThan(left, right string) string {
-	return fmt.Sprintf("${%s < %s}", left, right)
+	return fmt.Sprintf("${ %s < %s }", left, right)
 }
 
 // LessThanOrEqual builds a less-than-or-equal condition expression.
-// Example: LessThanOrEqual(FieldRef("count"), "100") generates "${.count <= 100}"
+// Example: LessThanOrEqual(Field("count"), Number(100)) generates "${ .count <= 100 }"
 func LessThanOrEqual(left, right string) string {
-	return fmt.Sprintf("${%s <= %s}", left, right)
+	return fmt.Sprintf("${ %s <= %s }", left, right)
 }
 
 // And combines multiple conditions with logical AND.
-// Example: And(Equals(FieldRef("status"), "200"), Equals(FieldRef("type"), "success"))
+// Example: And(Equals(Field("status"), Number(200)), Equals(Field("type"), Literal("success")))
 func And(conditions ...string) string {
 	// Remove ${ and } wrappers from conditions for proper nesting
 	unwrapped := make([]string, len(conditions))
 	for i, cond := range conditions {
-		unwrapped[i] = strings.TrimPrefix(strings.TrimSuffix(cond, "}"), "${")
+		unwrapped[i] = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(cond), "}"), "${"))
 	}
-	return fmt.Sprintf("${%s}", strings.Join(unwrapped, " && "))
+	return fmt.Sprintf("${ %s }", strings.Join(unwrapped, " && "))
 }
 
 // Or combines multiple conditions with logical OR.
-// Example: Or(Equals(FieldRef("status"), "200"), Equals(FieldRef("status"), "201"))
+// Example: Or(Equals(Field("status"), Number(200)), Equals(Field("status"), Number(201)))
 func Or(conditions ...string) string {
 	// Remove ${ and } wrappers from conditions for proper nesting
 	unwrapped := make([]string, len(conditions))
 	for i, cond := range conditions {
-		unwrapped[i] = strings.TrimPrefix(strings.TrimSuffix(cond, "}"), "${")
+		unwrapped[i] = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(cond), "}"), "${"))
 	}
-	return fmt.Sprintf("${%s}", strings.Join(unwrapped, " || "))
+	return fmt.Sprintf("${ %s }", strings.Join(unwrapped, " || "))
 }
 
 // Not negates a condition.
-// Example: Not(Equals(FieldRef("status"), "200")) generates "${!(.status == 200)}"
+// Example: Not(Equals(Field("status"), Number(200))) generates "${ !(.status == 200) }"
 func Not(condition string) string {
 	// Remove ${ and } wrapper from condition for proper nesting
-	unwrapped := strings.TrimPrefix(strings.TrimSuffix(condition, "}"), "${")
-	return fmt.Sprintf("${!(%s)}", unwrapped)
+	unwrapped := strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(condition), "}"), "${"))
+	return fmt.Sprintf("${ !(%s) }", unwrapped)
 }

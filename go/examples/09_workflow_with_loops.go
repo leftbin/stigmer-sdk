@@ -1,12 +1,26 @@
 //go:build ignore
 
+// ⚠️  WARNING: This example uses the OLD API
+//
+// This example has not been migrated to the new Pulumi-aligned API yet.
+// It demonstrates loop/iteration concepts but uses deprecated patterns.
+//
+// For migration guidance, see: docs/guides/typed-context-migration.md
+// For new API patterns, see: examples/07_basic_workflow.go
+//
+// OLD patterns used in this file:
+// - defer stigmer.Complete() → should use stigmer.Run(func(ctx) {...})
+// - HttpCallTask() with WithHTTPGet/Post() → should use wf.HttpGet/Post(name, uri)
+// - FieldRef() / VarRef() → should use task.Field(fieldName) for task outputs
+// - .ThenRef(task) → should use implicit dependencies via field references
+//
 // Package examples demonstrates workflow loops using FOR tasks.
 package main
 
 import (
 	"log"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -33,7 +47,7 @@ import (
 // - "Define first, reference later" pattern for compile-time validation
 // - FOR loop iteration over collections with type-safe task chaining
 func main() {
-	defer stigmeragent.Complete()
+	defer stigmer.Complete()
 
 	// Task 1: Fetch list of items from API
 	// Using JSONPlaceholder - a free fake REST API for testing and prototyping

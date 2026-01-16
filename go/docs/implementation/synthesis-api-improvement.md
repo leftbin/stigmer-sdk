@@ -5,7 +5,7 @@
 
 ## Summary
 
-Improved the synthesis API from exposing internal packages to a clean, single-package approach using the root `stigmeragent` package.
+Improved the synthesis API from exposing internal packages to a clean, single-package approach using the root `stigmer` package.
 
 **Before:**
 ```go
@@ -23,12 +23,12 @@ func main() {
 **After:**
 ```go
 import (
-    stigmeragent "github.com/leftbin/stigmer-sdk/go"    // ← Root package
+    stigmer "github.com/leftbin/stigmer-sdk/go"    // ← Root package
     "github.com/leftbin/stigmer-sdk/go/agent"
 )
 
 func main() {
-    defer stigmeragent.Complete()  // ← Clear intent
+    defer stigmer.Complete()  // ← Clear intent
     agent.New(...)
 }
 ```
@@ -47,12 +47,12 @@ User noticed a discrepancy between the original design (zero-boilerplate synthes
 
 ## Changes Made
 
-### 1. New Public API: `stigmeragent.Complete()`
+### 1. New Public API: `stigmer.Complete()`
 
 **File:** `synthesis.go` (root package)
 
 ```go
-package stigmeragent
+package stigmer
 
 func Complete() {
     synth.AutoSynth()
@@ -108,7 +108,7 @@ func autoSynth() {
 defer synth.AutoSynth()
 
 // After  
-defer stigmeragent.Complete()
+defer stigmer.Complete()
 ```
 
 ### 5. Comprehensive Documentation
@@ -131,7 +131,7 @@ defer stigmeragent.Complete()
 - `agent` → `synth` (for Complete())
 - `synth` → `agent` (for conversion)
 
-**Solution:** Move `Complete()` to root package (`stigmeragent`):
+**Solution:** Move `Complete()` to root package (`stigmer`):
 - Root package → `synth` (no cycle)
 - `synth` → `agent` (for conversion)
 - Users import both packages
@@ -208,14 +208,14 @@ For code using the old pattern:
 - "github.com/leftbin/stigmer-sdk/go/internal/synth"
 
 // Add
-+ stigmeragent "github.com/leftbin/stigmer-sdk/go"
++ stigmer "github.com/leftbin/stigmer-sdk/go"
 ```
 
 ### Step 2: Update Defer
 
 ```go
 - defer synth.AutoSynth()
-+ defer stigmeragent.Complete()
++ defer stigmer.Complete()
 ```
 
 ### Step 3: Verify
@@ -241,7 +241,7 @@ When Go 1.24 becomes mainstream:
 ```go
 //go:build go1.24
 
-package stigmeragent
+package stigmer
 
 import "runtime"
 
@@ -252,7 +252,7 @@ func init() {
 ```
 
 Then update docs to indicate:
-- **Go < 1.24:** Requires `defer stigmeragent.Complete()`
+- **Go < 1.24:** Requires `defer stigmer.Complete()`
 - **Go ≥ 1.24:** Fully automatic, no user code needed
 
 ### Potential Enhancements
@@ -284,14 +284,14 @@ go/
 ├── agent/agent.go                  # Removed Complete() (moved to root)
 ├── agent/doc.go                    # Updated with synthesis docs
 ├── internal/synth/synth.go         # Refactored autoSynth() logic
-└── examples/06_*.go                # Updated to use stigmeragent.Complete()
+└── examples/06_*.go                # Updated to use stigmer.Complete()
 ```
 
 ---
 
 ## Conclusion
 
-We successfully closed the gap between the original design and the Go implementation. The one line of boilerplate (`defer stigmeragent.Complete()`) is not a compromise in quality - it's an honest reflection of Go's language philosophy.
+We successfully closed the gap between the original design and the Go implementation. The one line of boilerplate (`defer stigmer.Complete()`) is not a compromise in quality - it's an honest reflection of Go's language philosophy.
 
 We've made it:
 1. **As minimal as possible** (1 line)

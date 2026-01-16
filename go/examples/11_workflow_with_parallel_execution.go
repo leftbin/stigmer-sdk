@@ -1,12 +1,26 @@
 //go:build ignore
 
+// ⚠️  WARNING: This example uses the OLD API
+//
+// This example has not been migrated to the new Pulumi-aligned API yet.
+// It demonstrates parallel execution concepts but uses deprecated patterns.
+//
+// For migration guidance, see: docs/guides/typed-context-migration.md
+// For new API patterns, see: examples/07_basic_workflow.go
+//
+// OLD patterns used in this file:
+// - defer stigmer.Complete() → should use stigmer.Run(func(ctx) {...})
+// - HttpCallTask() with WithHTTPGet() → should use wf.HttpGet(name, uri)
+// - FieldRef() → should use task.Field(fieldName)
+// - .ThenRef(task) → should use implicit dependencies via field references
+//
 // Package examples demonstrates parallel execution using FORK tasks.
 package main
 
 import (
 	"log"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -29,7 +43,7 @@ import (
 // - Automatic join semantics (next task waits for all branches to complete)
 // - Nested task structures within branches
 func main() {
-	defer stigmeragent.Complete()
+	defer stigmer.Complete()
 
 	// Task 1: Fetch data to process
 	// Using JSONPlaceholder - a free fake REST API for testing and prototyping

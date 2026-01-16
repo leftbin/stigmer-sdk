@@ -13,13 +13,13 @@ import (
 	"fmt"
 	"log"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/agent"
 	"github.com/leftbin/stigmer-sdk/go/skill"
 )
 
 func main() {
-	defer stigmeragent.Complete()
+	defer stigmer.Complete()
 
 	fmt.Println("=== Agent with Skills Example ===\n")
 

@@ -9,13 +9,13 @@ import (
 	"fmt"
 	"log"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
 	"github.com/leftbin/stigmer-sdk/go/agent"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 )
 
 func main() {
 	// Enable auto-synthesis - agent will be written to manifest.pb on exit
-	defer stigmeragent.Complete()
+	defer stigmer.Complete()
 
 	// Create a basic agent with required fields only
 	basicAgent, err := agent.New(
@@ -49,7 +49,7 @@ func main() {
 	fmt.Printf("   IconURL: %s\n", fullAgent.IconURL)
 	fmt.Printf("   Org: %s\n", fullAgent.Org)
 
-	// Note: When using the SDK standalone (without CLI), you must call defer stigmeragent.Complete()
+	// Note: When using the SDK standalone (without CLI), you must call defer stigmer.Complete()
 	// to enable manifest generation. The CLI's "Copy & Patch" architecture automatically injects
 	// this when running via `stigmer up`, so CLI-based projects don't need it.
 

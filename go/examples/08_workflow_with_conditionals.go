@@ -1,12 +1,26 @@
 //go:build ignore
 
+// ⚠️  WARNING: This example uses the OLD API
+//
+// This example has not been migrated to the new Pulumi-aligned API yet.
+// It demonstrates conditional logic concepts but uses deprecated patterns.
+//
+// For migration guidance, see: docs/guides/typed-context-migration.md
+// For new API patterns, see: examples/07_basic_workflow.go
+//
+// OLD patterns used in this file:
+// - defer stigmer.Complete() → should use stigmer.Run(func(ctx) {...})
+// - HttpCallTask() with WithHTTPGet() → should use wf.HttpGet(name, uri)
+// - FieldRef() → should use task.Field(fieldName)
+// - .ThenRef(task) → should use implicit dependencies via field references
+//
 // Package examples demonstrates workflow conditionals using SWITCH tasks.
 package main
 
 import (
 	"log"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -34,7 +48,7 @@ import (
 // - Explicit .End() for terminal tasks instead of .Then("end")
 // - Optional version (defaults to "0.1.0" for development)
 func main() {
-	defer stigmeragent.Complete()
+	defer stigmer.Complete()
 
 	// Task 1: Fetch data from API
 	//

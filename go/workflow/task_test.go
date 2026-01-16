@@ -405,8 +405,8 @@ func TestTask_ExportField(t *testing.T) {
 	task := workflow.HttpCallTask("fetch", workflow.WithMethod("GET"), workflow.WithURI("https://api.example.com"))
 	task.ExportField("count")
 
-	if task.ExportAs != "${.count}" {
-		t.Errorf("ExportField() set exportAs = %q, want %q", task.ExportAs, "${.count}")
+	if task.ExportAs != "${ $context.count }" {
+		t.Errorf("ExportField() set exportAs = %q, want %q", task.ExportAs, "${ $context.count }")
 	}
 }
 
@@ -503,7 +503,7 @@ func TestSetFloat(t *testing.T) {
 
 func TestVarRef(t *testing.T) {
 	result := workflow.VarRef("apiURL")
-	expected := "${apiURL}"
+	expected := "${ $context.apiURL }"
 
 	if result != expected {
 		t.Errorf("VarRef() = %q, want %q", result, expected)
@@ -512,7 +512,7 @@ func TestVarRef(t *testing.T) {
 
 func TestFieldRef(t *testing.T) {
 	result := workflow.FieldRef("count")
-	expected := "${.count}"
+	expected := "${ $context.count }"
 
 	if result != expected {
 		t.Errorf("FieldRef() = %q, want %q", result, expected)
@@ -520,7 +520,7 @@ func TestFieldRef(t *testing.T) {
 
 	// Test nested field path
 	result = workflow.FieldRef("response.data.count")
-	expected = "${.response.data.count}"
+	expected = "${ $context.response.data.count }"
 
 	if result != expected {
 		t.Errorf("FieldRef() with nested path = %q, want %q", result, expected)
@@ -528,39 +528,47 @@ func TestFieldRef(t *testing.T) {
 }
 
 func TestInterpolate(t *testing.T) {
-	// Test basic interpolation
+	// Test basic interpolation with expression
 	result := workflow.Interpolate(workflow.VarRef("apiURL"), "/data")
-	expected := "${apiURL}/data"
+	expected := "${ $context.apiURL + \"/data\" }"
 
 	if result != expected {
 		t.Errorf("Interpolate() = %q, want %q", result, expected)
 	}
 
-	// Test multiple parts
+	// Test multiple parts with expression
 	result = workflow.Interpolate("Bearer ", workflow.VarRef("API_TOKEN"))
-	expected = "Bearer ${API_TOKEN}"
+	expected = "${ \"Bearer \" + $context.API_TOKEN }"
 
 	if result != expected {
 		t.Errorf("Interpolate() with Bearer = %q, want %q", result, expected)
 	}
 
-	// Test complex interpolation
+	// Test complex interpolation with multiple expressions
 	result = workflow.Interpolate(
 		"https://",
 		workflow.VarRef("domain"),
 		"/api/v1/users/",
 		workflow.FieldRef("userId"),
 	)
-	expected = "https://${domain}/api/v1/users/${.userId}"
+	expected = "${ \"https://\" + $context.domain + \"/api/v1/users/\" + $context.userId }"
 
 	if result != expected {
 		t.Errorf("Interpolate() complex = %q, want %q", result, expected)
+	}
+
+	// Test plain string (no expressions)
+	result = workflow.Interpolate("https://api.example.com/data")
+	expected = "https://api.example.com/data"
+
+	if result != expected {
+		t.Errorf("Interpolate() plain string = %q, want %q", result, expected)
 	}
 }
 
 func TestErrorMessage(t *testing.T) {
 	result := workflow.ErrorMessage("httpErr")
-	expected := "${httpErr.message}"
+	expected := "${ .httpErr.message }"
 
 	if result != expected {
 		t.Errorf("ErrorMessage() = %q, want %q", result, expected)
@@ -569,7 +577,7 @@ func TestErrorMessage(t *testing.T) {
 
 func TestErrorCode(t *testing.T) {
 	result := workflow.ErrorCode("grpcErr")
-	expected := "${grpcErr.code}"
+	expected := "${ .grpcErr.code }"
 
 	if result != expected {
 		t.Errorf("ErrorCode() = %q, want %q", result, expected)
@@ -578,7 +586,7 @@ func TestErrorCode(t *testing.T) {
 
 func TestErrorStackTrace(t *testing.T) {
 	result := workflow.ErrorStackTrace("err")
-	expected := "${err.stackTrace}"
+	expected := "${ .err.stackTrace }"
 
 	if result != expected {
 		t.Errorf("ErrorStackTrace() = %q, want %q", result, expected)
@@ -587,7 +595,7 @@ func TestErrorStackTrace(t *testing.T) {
 
 func TestErrorObject(t *testing.T) {
 	result := workflow.ErrorObject("validationErr")
-	expected := "${validationErr}"
+	expected := "${ .validationErr }"
 
 	if result != expected {
 		t.Errorf("ErrorObject() = %q, want %q", result, expected)
@@ -596,7 +604,7 @@ func TestErrorObject(t *testing.T) {
 
 func TestIncrement(t *testing.T) {
 	result := workflow.Increment("retryCount")
-	expected := "${retryCount + 1}"
+	expected := "${ $context.retryCount + 1 }"
 
 	if result != expected {
 		t.Errorf("Increment() = %q, want %q", result, expected)
@@ -605,7 +613,7 @@ func TestIncrement(t *testing.T) {
 
 func TestDecrement(t *testing.T) {
 	result := workflow.Decrement("remaining")
-	expected := "${remaining - 1}"
+	expected := "${ $context.remaining - 1 }"
 
 	if result != expected {
 		t.Errorf("Decrement() = %q, want %q", result, expected)
@@ -621,17 +629,17 @@ func TestExpr(t *testing.T) {
 		{
 			name:     "arithmetic expression",
 			expr:     "(price * quantity) + tax",
-			expected: "${(price * quantity) + tax}",
+			expected: "${ (price * quantity) + tax }",
 		},
 		{
 			name:     "string concatenation",
 			expr:     "firstName + ' ' + lastName",
-			expected: "${firstName + ' ' + lastName}",
+			expected: "${ firstName + ' ' + lastName }",
 		},
 		{
 			name:     "conditional expression",
 			expr:     "score >= 90 ? 'A' : 'B'",
-			expected: "${score >= 90 ? 'A' : 'B'}",
+			expected: "${ score >= 90 ? 'A' : 'B' }",
 		},
 	}
 
@@ -691,7 +699,7 @@ func TestField(t *testing.T) {
 
 func TestVar(t *testing.T) {
 	got := workflow.Var("apiURL")
-	want := "apiURL"
+	want := "$context.apiURL"
 	if got != want {
 		t.Errorf("Var() = %q, want %q", got, want)
 	}
@@ -728,7 +736,7 @@ func TestNumber(t *testing.T) {
 
 func TestEquals(t *testing.T) {
 	got := workflow.Equals(workflow.Field("status"), workflow.Number(200))
-	want := "${.status == 200}"
+	want := "${ .status == 200 }"
 	if got != want {
 		t.Errorf("Equals() = %q, want %q", got, want)
 	}
@@ -736,7 +744,7 @@ func TestEquals(t *testing.T) {
 
 func TestNotEquals(t *testing.T) {
 	got := workflow.NotEquals(workflow.Field("status"), workflow.Number(404))
-	want := "${.status != 404}"
+	want := "${ .status != 404 }"
 	if got != want {
 		t.Errorf("NotEquals() = %q, want %q", got, want)
 	}
@@ -744,7 +752,7 @@ func TestNotEquals(t *testing.T) {
 
 func TestGreaterThan(t *testing.T) {
 	got := workflow.GreaterThan(workflow.Field("count"), workflow.Number(10))
-	want := "${.count > 10}"
+	want := "${ .count > 10 }"
 	if got != want {
 		t.Errorf("GreaterThan() = %q, want %q", got, want)
 	}
@@ -752,7 +760,7 @@ func TestGreaterThan(t *testing.T) {
 
 func TestGreaterThanOrEqual(t *testing.T) {
 	got := workflow.GreaterThanOrEqual(workflow.Field("status"), workflow.Number(500))
-	want := "${.status >= 500}"
+	want := "${ .status >= 500 }"
 	if got != want {
 		t.Errorf("GreaterThanOrEqual() = %q, want %q", got, want)
 	}
@@ -760,7 +768,7 @@ func TestGreaterThanOrEqual(t *testing.T) {
 
 func TestLessThan(t *testing.T) {
 	got := workflow.LessThan(workflow.Field("count"), workflow.Number(100))
-	want := "${.count < 100}"
+	want := "${ .count < 100 }"
 	if got != want {
 		t.Errorf("LessThan() = %q, want %q", got, want)
 	}
@@ -768,7 +776,7 @@ func TestLessThan(t *testing.T) {
 
 func TestLessThanOrEqual(t *testing.T) {
 	got := workflow.LessThanOrEqual(workflow.Field("count"), workflow.Number(100))
-	want := "${.count <= 100}"
+	want := "${ .count <= 100 }"
 	if got != want {
 		t.Errorf("LessThanOrEqual() = %q, want %q", got, want)
 	}
@@ -778,7 +786,7 @@ func TestAnd(t *testing.T) {
 	cond1 := workflow.Equals(workflow.Field("status"), workflow.Number(200))
 	cond2 := workflow.Equals(workflow.Field("type"), workflow.Literal("success"))
 	got := workflow.And(cond1, cond2)
-	want := "${.status == 200 && .type == \"success\"}"
+	want := "${ .status == 200 && .type == \"success\" }"
 	if got != want {
 		t.Errorf("And() = %q, want %q", got, want)
 	}
@@ -788,7 +796,7 @@ func TestOr(t *testing.T) {
 	cond1 := workflow.Equals(workflow.Field("status"), workflow.Number(200))
 	cond2 := workflow.Equals(workflow.Field("status"), workflow.Number(201))
 	got := workflow.Or(cond1, cond2)
-	want := "${.status == 200 || .status == 201}"
+	want := "${ .status == 200 || .status == 201 }"
 	if got != want {
 		t.Errorf("Or() = %q, want %q", got, want)
 	}
@@ -797,7 +805,7 @@ func TestOr(t *testing.T) {
 func TestNot(t *testing.T) {
 	cond := workflow.Equals(workflow.Field("status"), workflow.Number(200))
 	got := workflow.Not(cond)
-	want := "${!(.status == 200)}"
+	want := "${ !(.status == 200) }"
 	if got != want {
 		t.Errorf("Not() = %q, want %q", got, want)
 	}
@@ -809,7 +817,7 @@ func TestConditionBuildersIntegration(t *testing.T) {
 	cond2 := workflow.GreaterThanOrEqual(workflow.Field("count"), workflow.Number(5))
 	combined := workflow.And(cond1, cond2)
 
-	want := "${.status == 200 && .count >= 5}"
+	want := "${ .status == 200 && .count >= 5 }"
 	if combined != want {
 		t.Errorf("Complex condition = %q, want %q", combined, want)
 	}
@@ -828,17 +836,18 @@ func TestHighLevelHelpersIntegration(t *testing.T) {
 		t.Fatal("Integration test: config type is not *HttpCallTaskConfig")
 	}
 
-	expectedURI := "${apiURL}/users/${.userId}"
+	// Interpolate now generates proper expression syntax with $context for context variables
+	expectedURI := "${ $context.apiURL + \"/users/\" + $context.userId }"
 	if cfg.URI != expectedURI {
 		t.Errorf("Integration test: URI = %q, want %q", cfg.URI, expectedURI)
 	}
 
-	expectedAuth := "Bearer ${API_TOKEN}"
+	expectedAuth := "${ \"Bearer \" + $context.API_TOKEN }"
 	if cfg.Headers["Authorization"] != expectedAuth {
 		t.Errorf("Integration test: Authorization = %q, want %q", cfg.Headers["Authorization"], expectedAuth)
 	}
 
-	expectedExport := "${.name}"
+	expectedExport := "${ $context.name }"
 	if task.ExportAs != expectedExport {
 		t.Errorf("Integration test: exportAs = %q, want %q", task.ExportAs, expectedExport)
 	}

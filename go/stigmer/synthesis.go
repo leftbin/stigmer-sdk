@@ -1,4 +1,4 @@
-package stigmeragent
+package stigmer
 
 import "github.com/leftbin/stigmer-sdk/go/internal/synth"
 
@@ -10,11 +10,11 @@ import "github.com/leftbin/stigmer-sdk/go/internal/synth"
 //
 // Usage:
 //
-//	import stigmeragent "github.com/leftbin/stigmer-sdk/go"
+//	import "github.com/leftbin/stigmer-sdk/go/stigmer"
 //	import "github.com/leftbin/stigmer-sdk/go/agent"
 //	
 //	func main() {
-//	    defer stigmeragent.Complete()
+//	    defer stigmer.Complete()
 //	
 //	    agent.New(
 //	        agent.WithName("code-reviewer"),

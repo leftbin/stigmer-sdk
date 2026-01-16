@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/agent"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
 	"github.com/leftbin/stigmer-sdk/go/skill"
@@ -16,7 +16,7 @@ import (
 // 2. HTTP server (remote services)
 // 3. Docker server (containerized)
 func main() {
-	defer stigmeragent.Complete()
+	defer stigmer.Complete()
 
 	// Create Stdio MCP Server (GitHub)
 	// Most common type - runs as subprocess with stdin/stdout communication

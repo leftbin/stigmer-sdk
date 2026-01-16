@@ -210,6 +210,12 @@ func AutoSynth() {
 	synthOnce.Do(autoSynth)
 }
 
+// ResetForTesting resets the synthOnce guard to allow multiple AutoSynth() calls in tests.
+// This should ONLY be used in tests, never in production code.
+func ResetForTesting() {
+	synthOnce = sync.Once{}
+}
+
 // SynthToFile is a convenience function that synthesizes the manifest and writes it to a specific file.
 //
 // This is useful for testing or custom workflows where you want explicit control over the output location.

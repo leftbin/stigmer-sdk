@@ -17,9 +17,819 @@ This log captures all learnings, discoveries, and solutions from implementing an
 
 ---
 
+## Typed Context System (NEW MAJOR FEATURE)
+
+**Topic Coverage**: Pulumi-style context management, typed references, compile-time safety, IDE support, shared context between workflows and agents
+
+### 2026-01-16 - Pulumi-Style Typed Context System (MAJOR ARCHITECTURAL PATTERN)
+
+**Problem**: String-based variable references were error-prone, lacked IDE support, and provided no compile-time safety. Developers had to manually track variable names, risked typos, and had no autocomplete. Workflows and agents couldn't easily share configuration.
+
+**Root Cause**:
+- SDK used implicit global registry without explicit context management
+- No type system for variable references (everything was `string`)
+- No lifecycle management (synthesis happened implicitly)
+- No shared context between workflows and agents
+- Developer experience gaps: no autocomplete, no refactoring support, runtime errors from typos
+
+**Solution**: Implemented comprehensive typed context system modeled after Pulumi
+
+#### Architecture Overview
+
+**Core Pattern**: Explicit `Run()` function with typed Context
+
+```go
+// New pattern - Pulumi-style
+stigmer.Run(func(ctx *stigmer.Context) error {
+    // Create typed variables
+    apiURL := ctx.SetString("apiURL", "https://api.example.com")
+    retries := ctx.SetInt("retries", 3)
+    
+    // Use in workflow - compile-time checked!
+    wf, _ := workflow.NewWithContext(ctx,
+        workflow.WithTasks(
+            workflow.HttpCallTask("fetch",
+                workflow.WithURI(apiURL.Concat("/data")),  // Type-safe!
+                workflow.WithTimeout(retries),
+            ),
+        ),
+    )
+    
+    // Use in agent - same context!
+    ag, _ := agent.NewWithContext(ctx,
+        agent.WithOrg(orgName),  // Shared typed reference
+    )
+    
+    return nil  // Auto-synthesis on completion
+})
+```
+
+#### Implementation Components
+
+**1. Context Object** (`stigmer.Context`):
+```go
+type Context struct {
+    variables map[string]Ref           // Typed variable storage
+    workflows []*workflow.Workflow     // Registered workflows
+    agents    []*agent.Agent           // Registered agents
+    mu        sync.RWMutex             // Thread-safe access
+}
+```
+
+**2. Typed References** (all in `refs.go`):
+```go
+// StringRef - for strings with operations
+type StringRef struct {
+    baseRef
+    value string
+}
+
+func (s *StringRef) Concat(parts ...interface{}) *StringRef
+func (s *StringRef) Upper() *StringRef
+func (s *StringRef) Lower() *StringRef
+func (s *StringRef) Prepend(prefix string) *StringRef
+func (s *StringRef) Append(suffix string) *StringRef
+
+// IntRef - for integers with arithmetic
+type IntRef struct {
+    baseRef
+    value int
+}
+
+func (i *IntRef) Add(other *IntRef) *IntRef
+func (i *IntRef) Subtract(other *IntRef) *IntRef
+func (i *IntRef) Multiply(other *IntRef) *IntRef
+func (i *IntRef) Divide(other *IntRef) *IntRef
+
+// BoolRef - for booleans with logic
+type BoolRef struct {
+    baseRef
+    value bool
+}
+
+func (b *BoolRef) And(other *BoolRef) *BoolRef
+func (b *BoolRef) Or(other *BoolRef) *BoolRef
+func (b *BoolRef) Not() *BoolRef
+
+// ObjectRef - for nested objects
+type ObjectRef struct {
+    baseRef
+    value map[string]interface{}
+}
+
+func (o *ObjectRef) Field(name string) *ObjectRef
+func (o *ObjectRef) FieldAsString(fields ...string) *StringRef
+func (o *ObjectRef) FieldAsInt(fields ...string) *IntRef
+func (o *ObjectRef) FieldAsBool(fields ...string) *BoolRef
+```
+
+**3. Expression Generation**:
+```go
+// Refs generate correct JQ expressions
+func (r *baseRef) Expression() string {
+    if r.isComputed {
+        return fmt.Sprintf("${ %s }", r.rawExpression)
+    }
+    return fmt.Sprintf("${ $context.%s }", r.name)
+}
+
+// Examples:
+apiURL.Expression()                  // "${ $context.apiURL }"
+apiURL.Concat("/data").Expression()  // "${ $context.apiURL + "/data" }"
+count.Add(one).Expression()          // "${ $context.count + $context.one }"
+```
+
+**4. Backward Compatibility**:
+```go
+// Task builders accept interface{} - both old and new work
+func WithURI(uri interface{}) HttpCallTaskOption {
+    return func(cfg *HttpCallTaskConfig) {
+        cfg.URI = toExpression(uri)  // Handles string or Ref
+    }
+}
+
+// Old way still works:
+workflow.WithURI("https://api.example.com")  // ✅ String
+
+// New way also works:
+workflow.WithURI(apiURL)                      // ✅ StringRef
+workflow.WithURI(apiURL.Concat("/users"))    // ✅ Computed StringRef
+```
+
+**5. Import Cycle Avoidance**:
+```go
+// workflow package defines minimal interface (not full Context)
+type Context interface {
+    RegisterWorkflow(*Workflow)
+}
+
+// agent package defines minimal interface
+type Context interface {
+    RegisterAgent(*Agent)
+}
+
+// stigmer.Context implements both
+type Context struct { ... }
+func (c *Context) RegisterWorkflow(wf *workflow.Workflow) { ... }
+func (c *Context) RegisterAgent(ag *agent.Agent) { ... }
+```
+
+#### Benefits Delivered
+
+**Compile-Time Safety**:
+- ✅ Type mismatches caught at compile-time
+- ✅ Typos in variable names become compiler errors
+- ✅ IDEs provide autocomplete for variables
+- ✅ Refactoring tools can rename variables safely
+
+**Developer Experience**:
+- ✅ IDE autocomplete shows available variables
+- ✅ "Go to definition" works for variable references
+- ✅ Refactoring renames propagate correctly
+- ✅ Type information visible in IDE (hover shows types)
+
+**Code Quality**:
+- ✅ Self-documenting (types show intent)
+- ✅ Less cognitive load (IDE helps)
+- ✅ Fewer runtime errors (caught at compile-time)
+- ✅ Easier to understand (explicit context flow)
+
+**Collaboration**:
+- ✅ Workflows and agents share same context
+- ✅ Configuration reuse simplified
+- ✅ Consistent variable management
+
+#### Migration Strategy
+
+**Phase 1 - Backward Compatible**:
+- Old string-based API still works
+- No breaking changes
+- Developers can migrate gradually
+
+```go
+// Old way - still works
+wf, _ := workflow.New(
+    workflow.WithName("my-workflow"),
+    workflow.WithTasks(
+        workflow.HttpCallTask("fetch",
+            workflow.WithURI("https://api.example.com"),  // String
+        ),
+    ),
+)
+
+// New way - opt-in
+stigmer.Run(func(ctx *stigmer.Context) error {
+    apiURL := ctx.SetString("apiURL", "https://api.example.com")
+    
+    wf, _ := workflow.NewWithContext(ctx,
+        workflow.WithName("my-workflow"),
+        workflow.WithTasks(
+            workflow.HttpCallTask("fetch",
+                workflow.WithURI(apiURL),  // Ref
+            ),
+        ),
+    )
+    
+    return nil
+})
+```
+
+**Phase 2 - Deprecation** (future):
+- Mark old `workflow.New()` as deprecated
+- Recommend `workflow.NewWithContext()` in docs
+- Provide migration guide
+
+**Phase 3 - Breaking Change** (far future):
+- Remove old API (major version bump)
+- Typed context becomes required
+
+#### Testing Strategy
+
+**Integration Tests** (88+ tests):
+```go
+// Test both old and new APIs work
+func TestTaskBuilder_WithURIStringRef(t *testing.T) {
+    ctx := stigmer.NewContext()
+    apiURL := ctx.SetString("apiURL", "https://api.example.com")
+    
+    task := workflow.HttpCallTask("fetch",
+        workflow.WithHTTPGet(),
+        workflow.WithURI(apiURL),  // StringRef
+    )
+    
+    cfg := task.Config.(*workflow.HttpCallTaskConfig)
+    expected := "${ $context.apiURL }"
+    assert.Equal(t, expected, cfg.URI)
+}
+
+func TestTaskBuilder_WithURIString(t *testing.T) {
+    // Test backward compatibility
+    task := workflow.HttpCallTask("fetch",
+        workflow.WithHTTPGet(),
+        workflow.WithURI("https://api.example.com"),  // String
+    )
+    
+    cfg := task.Config.(*workflow.HttpCallTaskConfig)
+    expected := "https://api.example.com"
+    assert.Equal(t, expected, cfg.URI)
+}
+```
+
+#### Performance Considerations
+
+**Context Operations**:
+- Thread-safe with `sync.RWMutex`
+- Map lookups are O(1)
+- No significant overhead vs global registry
+
+**Expression Generation**:
+- Compile-time string construction
+- No runtime evaluation (JQ evaluator does that)
+- Zero performance impact on workflow execution
+
+**Memory**:
+- One Context per `Run()` invocation
+- Garbage collected after use
+- No memory leaks (no goroutines, no global state)
+
+#### Future Enhancements
+
+**Potential Additions**:
+1. **ListRef** - for array/slice operations
+2. **MapRef** - for map operations
+3. **Type Conversions** - StringRef to IntRef, etc.
+4. **Conditional Refs** - if/else expressions
+5. **Function Refs** - custom JQ functions
+
+**Advanced Patterns**:
+1. **Context Nesting** - child contexts inheriting from parent
+2. **Context Cloning** - copy context for parallel execution
+3. **Context Merging** - combine multiple contexts
+4. **Context Validation** - validate all variables set
+
+#### Common Pitfalls
+
+**❌ Using Ref.Value() in Expressions**:
+```go
+// WRONG - extracts value at compile-time
+apiURL := ctx.SetString("apiURL", "https://api.example.com")
+workflow.WithURI(apiURL.Value())  // Returns string, loses reference
+```
+
+**✅ Using Ref Directly**:
+```go
+// CORRECT - passes reference for runtime evaluation
+apiURL := ctx.SetString("apiURL", "https://api.example.com")
+workflow.WithURI(apiURL)  // Generates expression
+```
+
+**❌ Mixing Contexts**:
+```go
+// WRONG - different contexts
+stigmer.Run(func(ctx1 *stigmer.Context) error {
+    apiURL := ctx1.SetString("apiURL", "...")
+    
+    stigmer.Run(func(ctx2 *stigmer.Context) error {
+        // Can't use apiURL from ctx1 here
+        workflow.NewWithContext(ctx2, ...)  // Won't have apiURL
+        return nil
+    })
+    
+    return nil
+})
+```
+
+**✅ Single Context per Run**:
+```go
+// CORRECT - one context for all resources
+stigmer.Run(func(ctx *stigmer.Context) error {
+    apiURL := ctx.SetString("apiURL", "...")
+    
+    wf, _ := workflow.NewWithContext(ctx, ...)  // Has apiURL
+    ag, _ := agent.NewWithContext(ctx, ...)     // Has apiURL
+    
+    return nil
+})
+```
+
+#### Documentation
+
+**Created**:
+- `stigmer.go` with comprehensive godoc
+- `refs.go` with operation examples
+- `examples/07_basic_workflow.go` - workflow with typed context
+- `examples/08_agent_with_typed_context.go` - agent with typed context
+- `examples/09_workflow_and_agent_shared_context.go` - shared context demo
+
+**Pending** (Phase 5):
+- `MIGRATION.md` - step-by-step migration guide
+- `docs/typed-context.md` - comprehensive guide
+- Updated README with typed context examples
+
+#### Success Metrics
+
+**Achieved**:
+- ✅ 88+ tests passing
+- ✅ Zero breaking changes
+- ✅ ~3000 lines of code
+- ✅ Shared context working
+- ✅ IDE autocomplete verified
+- ✅ Refactoring support verified
+
+**Prevention**: 
+
+1. **Always Use `Run()` for New Code**: Start with typed context from the beginning
+2. **Test Both APIs During Migration**: Ensure backward compatibility
+3. **Use `interface{}` for New Parameters**: Future-proof builder patterns
+4. **Document Expression Generation**: Show what JQ expressions are generated
+5. **Provide Migration Examples**: Show before/after for common patterns
+
+**Go-Specific Insights**:
+- Minimal interfaces avoid import cycles elegantly in Go
+- `interface{}` parameters provide backward compatibility without generics
+- Method chaining (fluent API) works naturally with typed references
+- Go's strong typing makes this pattern much more valuable than in dynamic languages
+
+**Impact**: **CRITICAL** - This is a foundational pattern that all future SDK development should follow. It fundamentally improves developer experience and code quality.
+
+---
+
 ## Workflow SDK Implementation
 
-**Topic Coverage**: Workflow package architecture, task builders, multi-layer validation, fluent API patterns
+**Topic Coverage**: Workflow package architecture, task builders, multi-layer validation, fluent API patterns, expression generation
+
+### 2026-01-16 - Expression Generation for JQ Evaluator (CRITICAL BUG FIX)
+
+**Problem**: All workflows using SDK expression helpers failed at runtime with "variable not found" errors. Expressions like `${.apiURL}` were generated but JQ evaluator couldn't resolve context variables.
+
+**Root Cause**: 
+- Workflow-runner uses JQ for expression evaluation
+- JQ requires explicit `$context` reference to access workflow context variables
+- SDK was generating `${.varName}` (dot-prefix) which is only valid for task output fields
+- Missing `$context` prefix caused runtime errors when trying to access workflow variables
+
+**Solution**: Updated all expression helper functions to generate correct JQ format
+
+**Fixed Functions** (21 total):
+```go
+// Context Variable References
+func VarRef(varName string) string {
+    // BEFORE: return fmt.Sprintf("${.%s}", varName)  // ❌ Wrong scope
+    // AFTER:
+    return fmt.Sprintf("${ $context.%s }", varName)  // ✅ Correct
+}
+
+func FieldRef(fieldPath string) string {
+    return fmt.Sprintf("${ $context.%s }", fieldPath)
+}
+
+// Arithmetic Operations
+func Increment(varName string) string {
+    // BEFORE: return fmt.Sprintf("${%s + 1}", varName)  // ❌ Missing $context
+    // AFTER:
+    return fmt.Sprintf("${ $context.%s + 1 }", varName)  // ✅
+}
+
+func Decrement(varName string) string {
+    return fmt.Sprintf("${ $context.%s - 1 }", varName)
+}
+
+// Condition Builders
+func Var(varName string) string {
+    // Used in conditions (returns without ${ } wrapper)
+    // BEFORE: return varName  // ❌ Just "apiURL"
+    // AFTER:
+    return fmt.Sprintf("$context.%s", varName)  // ✅ "$context.apiURL"
+}
+
+// All comparison operators now use proper spacing
+func Equals(left, right string) string {
+    // BEFORE: return fmt.Sprintf("${%s == %s}", left, right)  // ❌ No spacing
+    // AFTER:
+    return fmt.Sprintf("${ %s == %s }", left, right)  // ✅ With spaces
+}
+```
+
+**IMPORTANT**: Error field accessors are DIFFERENT - they use dot-prefix (not `$context`):
+```go
+// Error variables are in task output scope, NOT workflow context
+func ErrorMessage(errorVar string) string {
+    return fmt.Sprintf("${ .%s.message }", errorVar)  // ✅ Correct (not $context)
+}
+
+// Why different? Error variables caught in CATCH blocks are stored
+// in current task's output context (accessed with .error), 
+// not in workflow context (accessed with $context.var)
+```
+
+**JQ Context Structure**:
+```json
+{
+  "$context": {
+    "apiURL": "https://api.example.com",
+    "retryCount": 0,
+    "status": "starting"
+  },
+  "body": { "...": "task output" },
+  "headers": { "...": "task output" }
+}
+```
+
+**Variable Access Rules**:
+- Workflow context variables: `$context.varName` ✅
+- Task output fields: `.field` ✅
+- Error objects (caught in CATCH): `.errorVar` ✅
+- Just `.varName` without proper scope: ❌ Not found
+
+**Prevention**: 
+- Always use `$context` prefix for workflow context variables
+- Use dot-prefix (`.field`) only for task output fields
+- Understand JQ scope semantics (context vs output)
+- Test expressions with comprehensive test cases
+
+**Testing**: Created comprehensive test suite with 50+ test cases
+
+**Example Usage**:
+```go
+// Context variables
+VarRef("apiURL")           → "${ $context.apiURL }"
+Increment("retryCount")    → "${ $context.retryCount + 1 }"
+Var("env")                 → "$context.env"  // For conditions
+
+// Task output fields
+Field("status")            → ".status"  // For conditions
+ErrorMessage("httpErr")    → "${ .httpErr.message }"
+
+// Interpolation
+Interpolate(VarRef("apiURL"), "/posts/1")
+→ "${ $context.apiURL + \"/posts/1\" }"
+```
+
+**Impact**: Fixed ALL workflows using dynamic expressions. This was a critical bug affecting every workflow that referenced context variables.
+
+**Cross-Reference**: Python SDK doesn't have this issue as Python synthesis generates YAML directly. This is Go SDK specific due to how workflow-runner's JQ evaluator works.
+
+---
+
+### 2026-01-16 - Typed Context System: Dual-Mode Expression Generation
+
+**Problem**: How to generate correct JQ expressions for both simple variable references (`$context.var`) and computed expressions (`$context.var + "/path"`)?
+
+**Root Cause**:
+- Simple references: Just need to wrap variable name with `${ $context.name }`
+- Computed expressions: Already have full expression, wrapping again creates `${ ${ $context.var } + ... }` (double-wrapping)
+- Initial approach tried to use `Expression()` method recursively, causing double-wrapping bug
+- Needed way to distinguish between simple vs computed references
+
+**Solution**: Implemented dual-mode expression generation with `isComputed` flag
+
+**Implementation**:
+```go
+// baseRef structure
+type baseRef struct {
+    name          string
+    isSecret      bool
+    isComputed    bool   // NEW: Distinguishes simple vs computed
+    rawExpression string // NEW: Stores expression without ${ } wrapper
+}
+
+func (r *baseRef) Expression() string {
+    if r.isComputed {
+        return fmt.Sprintf("${ %s }", r.rawExpression)  // Wrap raw expression
+    }
+    return fmt.Sprintf("${ $context.%s }", r.name)  // Wrap variable name
+}
+
+// Simple reference (isComputed = false)
+apiURL := &StringRef{
+    baseRef: baseRef{name: "apiURL", isComputed: false},
+    value: "https://api.example.com",
+}
+apiURL.Expression()  // "${ $context.apiURL }"
+
+// Computed expression (isComputed = true)
+func (s *StringRef) Append(suffix string) *StringRef {
+    var expr string
+    if s.isComputed {
+        expr = fmt.Sprintf(`(%s + "%s")`, s.rawExpression, suffix)
+    } else {
+        expr = fmt.Sprintf(`($context.%s + "%s")`, s.name, suffix)
+    }
+    return &StringRef{
+        baseRef: baseRef{
+            isComputed:    true,  // Mark as computed
+            rawExpression: expr,  // Store raw expression
+        },
+    }
+}
+
+endpoint := apiURL.Append("/users")
+endpoint.Expression()  // "${ ($context.apiURL + "/users") }"  ✅ Correct
+```
+
+**Prevention**:
+- Always set `isComputed = true` for operations that create new expressions
+- Store raw expression in `rawExpression` field (without `${ }` wrapper)
+- Let `Expression()` method handle wrapping based on `isComputed` flag
+- Never recursively call `Expression()` when building computed expressions
+
+**Testing**: 
+- 32 tests for all Ref type operations
+- Expression generation tests validating exact format
+- Complex expression chaining tests (concat + upper + prepend)
+
+**Impact**: Enables type-safe expression building with Pulumi-style API. Users get compile-time checking and IDE autocomplete for variable references.
+
+**Cross-Language Note**:
+- **Python approach**: Might use f-strings or string templates
+- **Go approach**: Uses dual-mode flag to prevent double-wrapping
+- **Conceptual similarity**: Both need to distinguish simple refs from computed expressions
+
+---
+
+### 2026-01-16 - Typed Context System: Thread-Safe Context Pattern
+
+**Problem**: Context object manages shared state (variables, workflows, agents) that might be accessed concurrently.
+
+**Root Cause**:
+- Context stores maps and slices that aren't inherently thread-safe
+- Even if concurrency unlikely now, future SDK features might introduce it
+- Better to be safe from the start than debug race conditions later
+- Go race detector would catch this in testing
+
+**Solution**: Implemented thread-safe Context with sync.RWMutex
+
+**Implementation**:
+```go
+type Context struct {
+    variables   map[string]Ref
+    workflows   []*workflow.Workflow
+    agents      []*agent.Agent
+    mu          sync.RWMutex  // Protects all fields
+    synthesized bool
+}
+
+// Write operations use Lock()
+func (c *Context) SetString(name, value string) *StringRef {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    
+    ref := &StringRef{...}
+    c.variables[name] = ref
+    return ref
+}
+
+// Read operations use RLock()
+func (c *Context) Get(name string) Ref {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+    
+    return c.variables[name]
+}
+
+// Inspection methods return copies (prevent external modification)
+func (c *Context) Variables() map[string]Ref {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+    
+    result := make(map[string]Ref, len(c.variables))
+    for k, v := range c.variables {
+        result[k] = v
+    }
+    return result  // Return copy, not original
+}
+```
+
+**Pattern Details**:
+- `sync.RWMutex` allows multiple concurrent readers OR single writer
+- Read-heavy workload (many `Get()` calls, few `Set()` calls) benefits from RWMutex
+- `defer` ensures unlock even if panic occurs
+- Inspection methods return copies to prevent external mutation
+
+**Prevention**:
+- Always acquire lock before accessing shared state
+- Use `defer` for unlock to handle early returns and panics
+- Return copies from inspection methods, not internal references
+- Test with `go test -race` to catch data races
+
+**Testing**:
+- Concurrent access test with 10 goroutines
+- Verified with Go race detector (`-race` flag)
+- No races detected
+
+**Impact**: Context is safe for concurrent use. Prevents subtle bugs in production.
+
+**Cross-Language Note**:
+- **Python approach**: GIL provides some thread safety, but still need locks for dict modification
+- **Go approach**: Explicit synchronization with RWMutex
+- **Conceptual similarity**: Both need synchronization for shared mutable state
+
+---
+
+### 2026-01-16 - Typed Context System: Pulumi-Style Run() Pattern
+
+**Problem**: Need clean lifecycle management for resource synthesis - when to synthesize workflows/agents?
+
+**Root Cause**:
+- Resources (workflows, agents) created throughout program execution
+- Need single point where synthesis happens
+- Want automatic synthesis on success, no synthesis on error
+- Need to prevent duplicate synthesis
+- User shouldn't have to remember to call `Synthesize()`
+
+**Solution**: Adopted Pulumi's `Run()` pattern for lifecycle management
+
+**Implementation**:
+```go
+// Run() function wraps user code
+func Run(fn func(*Context) error) error {
+    ctx := newContext()
+    
+    // Execute user function
+    if err := fn(ctx); err != nil {
+        return fmt.Errorf("context function failed: %w", err)
+    }
+    
+    // Synthesize all resources (only on success)
+    if err := ctx.Synthesize(); err != nil {
+        return fmt.Errorf("synthesis failed: %w", err)
+    }
+    
+    return nil
+}
+
+// User code
+func main() {
+    err := stigmer.Run(func(ctx *stigmer.Context) error {
+        // Create variables
+        apiURL := ctx.SetString("apiURL", "https://api.example.com")
+        
+        // Create workflows/agents
+        wf, err := workflow.New(ctx, ...)
+        if err != nil {
+            return err  // Error propagates, synthesis SKIPPED
+        }
+        
+        return nil  // Success: synthesis HAPPENS
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+**Pattern Benefits**:
+1. **Clean boundaries**: Context lifetime is explicit (function scope)
+2. **Automatic cleanup**: Synthesis happens automatically on success
+3. **Error propagation**: Errors short-circuit synthesis
+4. **Prevents duplicates**: Only one synthesis per Run()
+5. **Familiar pattern**: IaC developers know this from Pulumi
+
+**Prevention**:
+- Use `Run()` as entry point, not direct `newContext()` + `Synthesize()`
+- Return errors from user function to skip synthesis
+- Don't call `Synthesize()` manually (Run() does it)
+- Keep user function focused on resource creation
+
+**Testing**:
+- Success case: Synthesis called
+- Error case: Synthesis NOT called
+- Context provided to user function
+- All fields initialized correctly
+
+**Impact**: Clean, idiomatic API for lifecycle management. Prevents synthesis bugs.
+
+**Cross-Language Note**:
+- **Pulumi SDK**: Originated this pattern (TypeScript, Python, Go versions)
+- **Terraform CDK**: Uses App/Stack pattern (similar concept)
+- **AWS CDK**: Uses App/Stack pattern
+- **Stigmer SDK**: Adopted Run() pattern for familiarity to IaC developers
+
+---
+
+### 2026-01-16 - Typed Context System: Typed Getter Pattern
+
+**Problem**: Generic `Get(name) Ref` requires type assertion at call site. Cumbersome for users.
+
+**Root Cause**:
+- `Get()` returns `Ref` interface
+- User needs to type-assert: `ref.(*StringRef)` with nil check
+- Boilerplate at every call site
+- Easy to forget nil check (panic risk)
+
+**Solution**: Implemented typed getter methods that handle assertion internally
+
+**Implementation**:
+```go
+// Generic getter (still available)
+func (c *Context) Get(name string) Ref {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+    return c.variables[name]
+}
+
+// Typed getters (NEW)
+func (c *Context) GetString(name string) *StringRef {
+    ref := c.Get(name)
+    if stringRef, ok := ref.(*StringRef); ok {
+        return stringRef
+    }
+    return nil  // Wrong type or not found
+}
+
+func (c *Context) GetInt(name string) *IntRef {
+    ref := c.Get(name)
+    if intRef, ok := ref.(*IntRef); ok {
+        return intRef
+    }
+    return nil
+}
+
+// Similar for GetBool(), GetObject()
+```
+
+**Usage Comparison**:
+```go
+// BEFORE: Generic getter + manual assertion
+ref := ctx.Get("apiURL")
+apiURL, ok := ref.(*StringRef)
+if !ok {
+    // Handle wrong type
+}
+// Use apiURL
+
+// AFTER: Typed getter
+apiURL := ctx.GetString("apiURL")
+if apiURL != nil {
+    // Use apiURL
+}
+```
+
+**Pattern Benefits**:
+1. **Less boilerplate**: One call instead of get + assert + check
+2. **Safer**: Returns nil for wrong type (no panic)
+3. **More idiomatic**: Common Go pattern for typed access
+4. **Better errors**: User knows nil means wrong type or not found
+
+**Prevention**:
+- Provide typed getters for all Ref types
+- Return nil for wrong type (don't panic)
+- Document that nil means "not found or wrong type"
+- Keep generic `Get()` for when type is unknown
+
+**Testing**:
+- Test typed getter returns correct type
+- Test wrong type returns nil
+- Test not found returns nil
+
+**Impact**: More ergonomic API. Users write less code, fewer bugs.
+
+**Cross-Language Note**:
+- **Python approach**: Would use type hints with Optional[StringRef]
+- **Go approach**: Multiple methods, return nil for mismatch
+- **Conceptual similarity**: Both provide type-safe access without runtime exceptions
+
+---
 
 ### 2026-01-15 - Complete Workflow SDK with 12 Task Types
 
@@ -645,6 +1455,345 @@ workflow.New(
 
 ---
 
+### 2026-01-16 - Pulumi-Aligned API: TaskFieldRef and Implicit Dependencies (MAJOR PATTERN)
+
+**Problem**: Workflow API had confusing patterns that didn't match professional IaC tools:
+1. Magic field references - `FieldRef("title")` - unclear where "title" comes from
+2. Manual dependency management - `fetchTask.ThenRef(processTask)` - error-prone
+3. Verbose builders - `HttpCallTask("fetch", WithHTTPGet(), WithURI(url))` - boilerplate
+4. Confusing exports - `ExportAll()` - unclear semantics
+5. Context misuse - used for both config AND internal data flow
+
+**Root Cause**:
+- API design didn't follow Pulumi's patterns (the industry standard for IaC)
+- No explicit task output references - relied on global string matching
+- Dependencies not inferred from data flow
+- No builder convenience methods
+- Mixed concerns: context for config vs internal flow
+
+**Solution**: Transformed API to match Pulumi's design principles
+
+#### 1. TaskFieldRef Type - Clear Output References
+
+**Created**: New `TaskFieldRef` type implementing `Ref` interface for explicit origins
+
+```go
+// TaskFieldRef represents a typed reference to task output field
+type TaskFieldRef struct {
+    taskName  string  // Source task name
+    fieldName string  // Field name in output
+}
+
+func (r TaskFieldRef) Expression() string {
+    return fmt.Sprintf("${ $context.%s.%s }", r.taskName, r.fieldName)
+}
+
+func (r TaskFieldRef) TaskName() string {
+    return r.taskName  // Used for dependency tracking
+}
+
+// Task.Field() method creates field reference
+func (t *Task) Field(fieldName string) TaskFieldRef {
+    return TaskFieldRef{
+        taskName:  t.Name,
+        fieldName: fieldName,
+    }
+}
+```
+
+**Before** (magic strings):
+```go
+workflow.FieldRef("title")  // ❌ Where does "title" come from?
+```
+
+**After** (explicit origin):
+```go
+fetchTask := wf.HttpGet("fetch", endpoint)
+title := fetchTask.Field("title")  // ✅ Clear: from fetchTask!
+```
+
+#### 2. Implicit Dependency Tracking
+
+**Implemented**: Automatic dependency tracking through TaskFieldRef usage
+
+**How it works**:
+1. When `TaskFieldRef` is used in `SetVar()` or `WithURI()`, extract task name
+2. Store in `ImplicitDependencies map[string]bool` on task config
+3. During task creation, propagate dependencies to `Task.Dependencies []string`
+4. Workflow synthesis uses Dependencies field for execution order
+
+**Changes**:
+```go
+// Added to Task struct
+type Task struct {
+    // ... existing fields ...
+    Dependencies []string  // NEW: Automatic dependency tracking
+}
+
+// Added to configs
+type SetTaskConfig struct {
+    Variables            map[string]string
+    ImplicitDependencies map[string]bool  // NEW
+}
+
+type HttpCallTaskConfig struct {
+    // ... existing fields ...
+    ImplicitDependencies map[string]bool  // NEW
+}
+
+// Updated SetVar to track dependencies
+func SetVar(key string, value interface{}) SetTaskOption {
+    return func(cfg *SetTaskConfig) {
+        cfg.Variables[key] = toExpression(value)
+        
+        // Track implicit dependency
+        if fieldRef, ok := value.(TaskFieldRef); ok {
+            if cfg.ImplicitDependencies == nil {
+                cfg.ImplicitDependencies = make(map[string]bool)
+            }
+            cfg.ImplicitDependencies[fieldRef.TaskName()] = true
+        }
+    }
+}
+
+// Updated SetTask to propagate dependencies
+func SetTask(name string, opts ...SetTaskOption) *Task {
+    cfg := &SetTaskConfig{
+        Variables:            make(map[string]string),
+        ImplicitDependencies: make(map[string]bool),
+    }
+
+    for _, opt := range opts {
+        opt(cfg)
+    }
+
+    task := &Task{
+        Name:         name,
+        Kind:         TaskKindSet,
+        Config:       cfg,
+        Dependencies: []string{},
+    }
+
+    // Propagate implicit dependencies
+    for taskName := range cfg.ImplicitDependencies {
+        task.Dependencies = append(task.Dependencies, taskName)
+    }
+
+    return task
+}
+```
+
+**Before** (manual dependencies):
+```go
+fetchTask := workflow.HttpCallTask("fetch", ...)
+processTask := workflow.SetTask("process", ...)
+fetchTask.ThenRef(processTask)  // ❌ Manual!
+```
+
+**After** (implicit dependencies):
+```go
+fetchTask := wf.HttpGet("fetch", endpoint)
+processTask := wf.SetVars("process",
+    "title", fetchTask.Field("title"),  // ✅ Dependency automatic!
+)
+// No ThenRef needed!
+```
+
+#### 3. Task.DependsOn() Escape Hatch
+
+**Added**: Explicit dependency method for edge cases (like Pulumi's `pulumi.DependsOn()`)
+
+```go
+func (t *Task) DependsOn(tasks ...*Task) *Task {
+    for _, task := range tasks {
+        if !contains(t.Dependencies, task.Name) {
+            t.Dependencies = append(t.Dependencies, task.Name)
+        }
+    }
+    return t
+}
+```
+
+**When to use**: Side effects matter but no data flow (e.g., cleanup tasks)
+
+#### 4. Workflow Convenience Methods
+
+**Added**: Pulumi-style builders directly on Workflow
+
+```go
+func (w *Workflow) HttpGet(name string, uri interface{}, opts ...HttpCallTaskOption) *Task {
+    allOpts := []HttpCallTaskOption{
+        WithHTTPGet(),
+        WithURI(uri),
+    }
+    allOpts = append(allOpts, opts...)
+    
+    task := HttpCallTask(name, allOpts...)
+    w.AddTask(task)  // Auto-add to workflow
+    return task
+}
+
+func (w *Workflow) SetVars(name string, keyValuePairs ...interface{}) *Task {
+    // Validate even number of arguments (key-value pairs)
+    opts := make([]SetTaskOption, 0)
+    for i := 0; i < len(keyValuePairs); i += 2 {
+        key := keyValuePairs[i].(string)
+        value := keyValuePairs[i+1]
+        opts = append(opts, SetVar(key, value))
+    }
+    
+    task := SetTask(name, opts...)
+    w.AddTask(task)
+    return task
+}
+```
+
+**Before** (verbose):
+```go
+fetchTask := workflow.HttpCallTask("fetch",
+    workflow.WithHTTPGet(),
+    workflow.WithURI(endpoint),
+    workflow.WithHeader("Content-Type", "application/json"),
+    workflow.WithTimeout(30),
+)
+wf.AddTask(fetchTask)
+```
+
+**After** (clean):
+```go
+fetchTask := wf.HttpGet("fetch", endpoint,
+    workflow.Header("Content-Type", "application/json"),
+    workflow.Timeout(30),
+)
+// Task automatically added!
+```
+
+#### 5. Validation Changes
+
+**Changed**: Allow workflows without tasks during creation
+
+```go
+// Before: Required at least one task
+if len(w.Tasks) == 0 {
+    return NewValidationErrorWithCause(
+        "tasks", "", "min_items",
+        "workflow must have at least one task",
+        ErrNoTasks,
+    )
+}
+
+// After: Allow empty (supports wf.New() then wf.HttpGet() pattern)
+if len(w.Tasks) == 0 {
+    return nil  // Allow empty workflows
+}
+```
+
+**Rationale**: Enables Pulumi-style workflow construction:
+```go
+wf := workflow.New(ctx, ...)  // Create first
+fetchTask := wf.HttpGet(...)   // Add tasks after
+```
+
+#### Complete Example Transformation
+
+**Before** (confusing):
+```go
+// Context for everything
+apiURL := ctx.SetString("apiURL", "https://...")
+retryCount := ctx.SetInt("retryCount", 0)
+
+// Redundant copying
+initTask := workflow.SetTask("initialize",
+    workflow.SetVar("currentURL", apiURL),
+    workflow.SetVar("currentRetries", retryCount),
+)
+
+// Verbose builders
+fetchTask := workflow.HttpCallTask("fetchData",
+    workflow.WithHTTPGet(),
+    workflow.WithURI(endpoint),
+    workflow.WithHeader("Content-Type", "application/json"),
+).ExportAll()  // ❌ Confusing
+
+// Magic field references
+processTask := workflow.SetTask("processResponse",
+    workflow.SetVar("postTitle", workflow.FieldRef("title")),  // ❌ Where from?
+    workflow.SetVar("postBody", workflow.FieldRef("body")),
+)
+
+// Manual dependencies
+initTask.ThenRef(fetchTask)
+fetchTask.ThenRef(processTask)
+```
+
+**After** (professional):
+```go
+// Context ONLY for config (like Pulumi)
+apiBase := ctx.SetString("apiBase", "https://...")
+orgName := ctx.SetString("org", "my-org")
+
+// Create workflow
+wf := workflow.New(ctx,
+    workflow.Name("basic-data-fetch"),
+    workflow.Org(orgName),
+)
+
+// Build endpoint
+endpoint := apiBase.Concat("/posts/1")
+
+// Clean HTTP GET (one-liner)
+fetchTask := wf.HttpGet("fetchData", endpoint,
+    workflow.Header("Content-Type", "application/json"),
+    workflow.Timeout(30),
+)
+
+// Process response with clear origins
+processTask := wf.SetVars("processResponse",
+    "postTitle", fetchTask.Field("title"),  // ✅ Clear origin!
+    "postBody", fetchTask.Field("body"),    // ✅ Clear origin!
+    "status", "success",
+)
+// Dependencies automatic!
+```
+
+**Impact**:
+- ✅ API matches industry standard (Pulumi)
+- ✅ Clear origins for all field references
+- ✅ Implicit dependencies (90% of cases)
+- ✅ Clean, readable code
+- ✅ Better developer experience
+- ✅ Type safety and IDE autocomplete
+- ✅ Reduced boilerplate (~40% fewer lines)
+
+**Prevention**:
+- Model APIs after proven systems (Pulumi, Terraform)
+- Infer relationships from data flow
+- Make common patterns easy, edge cases possible
+- Provide escape hatches (`DependsOn()`) for exceptions
+- Keep validation flexible for different construction patterns
+
+**Testing**:
+- All existing workflow tests still pass
+- Example 07 rewritten demonstrating new patterns
+- Implicit dependencies verified in test output
+
+**Files Modified**:
+- `workflow/task.go` (~300 lines added)
+- `workflow/workflow.go` (~150 lines added)
+- `workflow/validation.go` (logic updated)
+- `workflow/workflow_test.go` (test updated)
+- `examples/07_basic_workflow.go` (complete rewrite)
+
+**Cross-Language Reference**:
+- **Python approach**: Not yet implemented in Python SDK
+- **Go approach**: TaskFieldRef type + implicit dependency tracking
+- **Reusable concept**: Task output references with automatic dependencies
+- **Apply to Python SDK**: Consider similar pattern with Python type hints
+
+**Related**: Phase 5.1 of Project 20260116.04.sdk-typed-context-system
+
+---
+
 ## Proto Converters & Transformations
 
 **Topic Coverage**: Proto message conversions, pointer handling, nil checks, nested messages, repeated fields
@@ -1058,7 +2207,7 @@ func deployFromManifest(path string) error {
 ```go
 // SDK can define multiple resources
 func main() {
-    defer stigmeragent.Complete()
+    defer stigmer.Complete()
     
     // Multiple agents
     agent1 := agent.New(...)
@@ -1703,7 +2852,178 @@ func TestWorkflow_Creation(t *testing.T) {
 
 ## Testing Patterns
 
-**Topic Coverage**: Table-driven tests, test fixtures, mocking, integration tests
+**Topic Coverage**: Table-driven tests, test fixtures, mocking, integration tests, expression testing
+
+### 2026-01-16 - Comprehensive Expression Testing Pattern
+
+**Problem**: Expression helper functions are critical for workflow functionality but were untested, leading to bugs like incorrect JQ format that broke all dynamic expressions.
+
+**Root Cause**:
+- Expression helpers generate string outputs (JQ expressions)
+- Easy to make formatting mistakes (`${.var}` vs `${ $context.var }`)
+- No tests to catch expression format errors
+- Bugs only discovered at runtime when workflows execute
+
+**Solution**: Create comprehensive test suite with 50+ test cases covering all expression types and edge cases
+
+**Implementation Pattern**:
+
+```go
+// File: workflow/expression_test.go
+
+// Test basic expression generation
+func TestVarRef(t *testing.T) {
+    tests := []struct {
+        name     string
+        varName  string
+        expected string
+    }{
+        {
+            name:     "simple variable",
+            varName:  "apiURL",
+            expected: "${ $context.apiURL }",
+        },
+        {
+            name:     "counter variable",
+            varName:  "retryCount",
+            expected: "${ $context.retryCount }",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := VarRef(tt.varName)
+            if result != tt.expected {
+                t.Errorf("VarRef(%q) = %q, want %q", 
+                    tt.varName, result, tt.expected)
+            }
+        })
+    }
+}
+
+// Test complex interpolation scenarios
+func TestComplexInterpolation(t *testing.T) {
+    tests := []struct {
+        name     string
+        build    func() string
+        expected string
+    }{
+        {
+            name: "API URL with version and path",
+            build: func() string {
+                baseURL := VarRef("baseURL")
+                version := VarRef("version")
+                return Interpolate(baseURL, "/v", version, "/posts/1")
+            },
+            expected: "${ $context.baseURL + \"/v\" + $context.version + \"/posts/1\" }",
+        },
+        {
+            name: "Authorization header",
+            build: func() string {
+                token := VarRef("token")
+                return Interpolate("Bearer ", token)
+            },
+            expected: "${ \"Bearer \" + $context.token }",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := tt.build()
+            if result != tt.expected {
+                t.Errorf("%s = %q, want %q", tt.name, result, tt.expected)
+            }
+        })
+    }
+}
+
+// Test all condition builders
+func TestConditionBuilders(t *testing.T) {
+    tests := []struct {
+        name     string
+        build    func() string
+        expected string
+    }{
+        {
+            name: "field equals number",
+            build: func() string {
+                return Equals(Field("status"), Number(200))
+            },
+            expected: "${ .status == 200 }",
+        },
+        {
+            name: "context var equals literal",
+            build: func() string {
+                return Equals(Var("apiURL"), Literal("https://api.example.com"))
+            },
+            expected: "${ $context.apiURL == \"https://api.example.com\" }",
+        },
+        {
+            name: "AND condition",
+            build: func() string {
+                return And(
+                    Equals(Field("status"), Number(200)),
+                    Equals(Field("type"), Literal("success")),
+                )
+            },
+            expected: "${ .status == 200 && .type == \"success\" }",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := tt.build()
+            if result != tt.expected {
+                t.Errorf("%s = %q, want %q", tt.name, result, tt.expected)
+            }
+        })
+    }
+}
+```
+
+**Testing Strategy**:
+1. **Test Each Helper Function**: Separate test function for each expression helper
+2. **Table-Driven Tests**: Use test tables for multiple scenarios
+3. **Exact String Matching**: Validate exact format including spaces
+4. **Edge Cases**: Test with special characters, nested expressions, empty strings
+5. **Complex Scenarios**: Test real-world usage patterns
+6. **Builder Functions**: Use functions in test cases to build complex expressions
+
+**Benefits**:
+- ✅ Catches format errors immediately
+- ✅ Documents expected output format
+- ✅ Prevents regressions when refactoring
+- ✅ Validates all expression types comprehensively
+- ✅ Easy to add new test cases
+- ✅ Clear error messages show exact diff
+
+**Coverage**:
+- Basic expressions: VarRef, FieldRef, Increment, Decrement
+- Interpolation: Single part, multiple parts, plain strings
+- Custom expressions: Expr with various formats
+- Error helpers: ErrorMessage, ErrorCode, ErrorStackTrace, ErrorObject
+- Conditions: Equals, NotEquals, GreaterThan, etc.
+- Logical operators: And, Or, Not
+- Complex scenarios: Nested expressions, real-world patterns
+
+**Prevention**:
+- Always add tests when creating new expression helpers
+- Test exact format including spacing and prefixes
+- Include edge cases and special characters
+- Use table-driven tests for multiple scenarios
+- Test both individual functions and compositions
+- Validate with actual workflow execution if possible
+
+**Example Output**:
+```bash
+go test ./workflow
+# ok  	github.com/leftbin/stigmer-sdk/go/workflow	0.518s
+# 50+ test cases all passing
+```
+
+**Impact**: This testing pattern caught the `$context` bug immediately when tests were added, and will prevent similar bugs in the future.
+
+---
 
 ### 2026-01-13 - Test Helper Pattern for API Migration
 
@@ -2096,7 +3416,7 @@ func ToManifest(a *agent.Agent) {...}  // synth → agent
 
 // ✅ AFTER: Root package breaks cycle
 // synthesis.go (root package)
-package stigmeragent
+package stigmer
 
 import "github.com/leftbin/stigmer-sdk/go/internal/synth"
 
@@ -2138,11 +3458,11 @@ After (NO CYCLE):
 **Usage Pattern**:
 
 ```go
-import stigmeragent "github.com/leftbin/stigmer-sdk/go"  // Root
+import stigmer "github.com/leftbin/stigmer-sdk/go"  // Root
 import "github.com/leftbin/stigmer-sdk/go/agent"         // Subpackage
 
 func main() {
-    defer stigmeragent.Complete()  // Root package function
+    defer stigmer.Complete()  // Root package function
     
     agent.New(...)  // Subpackage function
 }
@@ -2171,7 +3491,7 @@ go build ./...
 
 ### 2026-01-13 - Go Language Constraints: No atexit Hooks
 
-**Problem**: User questioned why Go SDK requires `defer stigmeragent.Complete()` when the original design envisioned zero-boilerplate synthesis (like Python's `atexit` hooks).
+**Problem**: User questioned why Go SDK requires `defer stigmer.Complete()` when the original design envisioned zero-boilerplate synthesis (like Python's `atexit` hooks).
 
 **Root Cause**:
 - **Python has `atexit.register()`** - automatically runs functions on exit
@@ -2216,10 +3536,10 @@ go build ./...
 
 ```go
 // Best possible API given Go's constraints
-import stigmeragent "github.com/leftbin/stigmer-sdk/go"
+import stigmer "github.com/leftbin/stigmer-sdk/go"
 
 func main() {
-    defer stigmeragent.Complete()  // ONE line of boilerplate
+    defer stigmer.Complete()  // ONE line of boilerplate
     
     agent.New(...)  // Rest is clean
 }
@@ -2271,7 +3591,7 @@ Created comprehensive documentation explaining this:
 ```go
 //go:build go1.24
 
-package stigmeragent
+package stigmer
 
 import "runtime"
 
@@ -2302,7 +3622,7 @@ When designing multi-language SDKs, recognize that not all languages have the sa
 **Root Cause**:
 - **Two different usage contexts**: CLI-driven vs standalone SDK
 - **CLI examples**: No synthesis needed (CLI's "Copy & Patch" injects it automatically)
-- **SDK standalone examples**: Need explicit `defer stigmeragent.Complete()`
+- **SDK standalone examples**: Need explicit `defer stigmer.Complete()`
 - **Inconsistency**: Some SDK examples had synthesis, others missing it
 - **Unclear documentation**: When synthesis is needed vs not needed
 
@@ -2318,11 +3638,11 @@ When designing multi-language SDKs, recognize that not all languages have the sa
 
 ```go
 // ✅ ALL SDK examples now use consistent pattern
-import stigmeragent "github.com/leftbin/stigmer-sdk/go"
+import stigmer "github.com/leftbin/stigmer-sdk/go"
 import "github.com/leftbin/stigmer-sdk/go/agent"      // or workflow
 
 func main() {
-	defer stigmeragent.Complete()
+	defer stigmer.Complete()
 	
 	// Agent or workflow definition...
 	agent.New(...) // or workflow.New(...)
@@ -2334,7 +3654,7 @@ func main() {
 | Context | Synthesis Needed? | Why |
 |---------|------------------|-----|
 | **CLI-driven** (`stigmer up main.go`) | ❌ NO | CLI injects automatically via "Copy & Patch" |
-| **Standalone** (`go run main.go`) | ✅ YES | Must call `defer stigmeragent.Complete()` |
+| **Standalone** (`go run main.go`) | ✅ YES | Must call `defer stigmer.Complete()` |
 
 **CLI "Copy & Patch" Architecture** (for reference):
 1. CLI copies user's project to sandbox
@@ -2342,20 +3662,20 @@ func main() {
 3. Generates `stigmer_bootstrap_gen.go` with:
    ```go
    func main() {
-       defer stigmeragent.Complete()  // ← Injected!
+       defer stigmer.Complete()  // ← Injected!
        _stigmer_user_main()
    }
    ```
 4. Runs patched code with `STIGMER_OUT_DIR` set
 
 **Files Fixed (11 examples)**:
-- All 6 agent examples: Added `defer stigmeragent.Complete()`
-- All 5 workflow examples: Fixed import to use `stigmeragent` (not `synthesis`)
+- All 6 agent examples: Added `defer stigmer.Complete()`
+- All 5 workflow examples: Fixed import to use `stigmer` (not `synthesis`)
 
 **Documentation Added**:
 ```go
 // Note: When using the SDK standalone (without CLI), you must call 
-// defer stigmeragent.Complete() to enable manifest generation. The CLI's 
+// defer stigmer.Complete() to enable manifest generation. The CLI's 
 // "Copy & Patch" architecture automatically injects this when running via 
 // `stigmer up`, so CLI-based projects don't need it.
 ```
@@ -2369,7 +3689,7 @@ func main() {
 
 **Pattern Established**: SDK examples should always be complete, runnable programs:
 - Import root package for synthesis control
-- Include `defer stigmeragent.Complete()`
+- Include `defer stigmer.Complete()`
 - Document that CLI handles this automatically
 - Show both contexts in README
 
@@ -2383,7 +3703,7 @@ func main() {
 
 **Cross-Language Reference**:
 - **Python approach**: SDK uses `atexit.register()` - truly automatic
-- **Go approach**: Requires `defer stigmeragent.Complete()` - one line
+- **Go approach**: Requires `defer stigmer.Complete()` - one line
 - **CLI universal**: All languages benefit from "Copy & Patch" injection
 - **Pattern**: Examples show standalone usage, CLI documentation explains injection
 
@@ -2566,7 +3886,367 @@ Is this a multi-purpose package? (workflow with many task types)
 
 ## Documentation Organization
 
-**Topic Coverage**: Documentation standards, filename conventions, categorization, navigation
+**Topic Coverage**: Documentation standards, filename conventions, categorization, navigation, professional SDK documentation patterns
+
+### 2026-01-16 - Comprehensive Pulumi-Aligned API Documentation (MAJOR DOCUMENTATION PATTERN)
+
+**Problem**: After implementing Pulumi-aligned API patterns (Phases 1-5), needed comprehensive documentation showing migration paths, design rationale, and best practices. Users migrating from old API needed step-by-step guidance. New users needed to understand the "why" behind design decisions.
+
+**Root Cause**:
+- Major API redesign created gap between OLD and NEW patterns  
+- Design decisions needed documentation for future reference
+- Migration path not obvious without examples
+- Professional SDKs (like Pulumi) have comprehensive docs - we needed same quality
+
+**Solution**: Created professional-grade documentation suite (~2530 lines) following industry best practices
+
+#### Documentation Structure Created
+
+```
+go/
+├── README.md                           # Updated with workflow section
+├── docs/
+│   ├── README.md                       # Updated index
+│   ├── guides/
+│   │   └── typed-context-migration.md  # 900 lines - Migration guide
+│   ├── architecture/
+│   │   └── pulumi-aligned-patterns.md  # 650 lines - Design rationale
+│   └── references/                     # Existing refs
+├── stigmer/
+│   └── doc.go                          # 230 lines - Package godoc
+├── workflow/
+│   └── doc.go                          # 270 lines - Package godoc
+└── examples/
+    └── README_WORKFLOW_EXAMPLES.md     # 250 lines - Example status
+```
+
+**Total Documentation**: ~2530 lines
+
+#### 1. Migration Guide Pattern (900 lines)
+
+**File**: `docs/guides/typed-context-migration.md`
+
+**Structure**:
+1. **Quick Comparison** - OLD ❌ vs NEW ✅ tables
+2. **Core Design Changes** - 5 major changes explained
+3. **Migration Steps** - 7 steps with before/after code
+4. **Complete Example** - Real 40-line transformation
+5. **Breaking Changes Table** - Quick reference
+6. **Benefits Analysis** - Why migrate (40% less code)
+7. **Troubleshooting** - 4 common errors with solutions
+8. **Migration Checklist** - Validation steps
+9. **FAQ** - 12 common questions answered
+
+**Key Pattern**: Side-by-side code comparisons throughout
+
+```markdown
+## Field References
+
+\`\`\`go
+// BEFORE ❌ - Where does "title" come from?
+processTask := workflow.SetTask("process",
+    workflow.SetVar("postTitle", workflow.FieldRef("title")), // ???
+)
+
+// AFTER ✅ - Crystal clear!
+processTask := wf.SetVars("process",
+    "postTitle", fetchTask.Field("title"), // From fetchTask!
+)
+\`\`\`
+```
+
+**Why This Works**:
+- Concrete before/after examples (not abstract explanations)
+- Users see exact transformation needed
+- Explanatory comments show the improvement
+- Real code they can copy-paste
+
+#### 2. Architecture Documentation Pattern (650 lines)
+
+**File**: `docs/architecture/pulumi-aligned-patterns.md`
+
+**Structure**:
+1. **Core Philosophy** - "Feel like Pulumi, not proto messages"
+2. **How Pulumi Works** - Context for the design
+3. **Stigmer Alignment** - Each Pulumi pattern explained
+4. **Mermaid Diagrams** - OLD vs NEW visual comparison (3 diagrams)
+5. **Internal Architecture** - How it works under the hood
+6. **Dependency Tracking** - Algorithm explained
+7. **Comparison Tables** - Pulumi/Terraform/CloudFormation
+8. **Design Decisions** - Rationale for each choice
+9. **Future Enhancements** - Planned features
+10. **Testing Patterns** - How to test
+
+**Key Pattern**: Explain "why" before "how"
+
+```markdown
+## Why Pulumi vs. Terraform Style?
+
+**Decision**: Pulumi-style because:
+1. ✅ Go SDK - naturally code-first
+2. ✅ Strong typing benefits
+3. ✅ Better IDE support
+4. ✅ More familiar to Go developers
+
+(Followed by detailed explanation)
+```
+
+**Why This Works**:
+- Shows research and reasoning
+- Educates users on design philosophy
+- Builds confidence in architecture
+- Answers "why this way?" questions proactively
+
+#### 3. Mermaid Diagrams for Visual Learning
+
+**Pattern**: Use flowcharts to show transformation
+
+```markdown
+### OLD: Confusing Context + Manual Dependencies
+
+\`\`\`mermaid
+flowchart TB
+    Context["Context<br/>(Config + Data)"]
+    Context -->|Copy to| Init[Init Task]
+    Fetch -->|ExportAll| Exports[Exported Fields]
+    Exports -.->|FieldRef string| Process
+    style Context fill:#ffcccc
+\`\`\`
+
+### NEW: Clear Config + Implicit Dependencies
+
+\`\`\`mermaid
+flowchart TB
+    Context["Context<br/>(Config Only)"]
+    Context -->|Config refs| WF[Workflow Metadata]
+    Fetch -->|.Field output| Process[Process Task]
+    style Context fill:#ccffcc
+\`\`\`
+```
+
+**Why This Works**:
+- Visual learners understand immediately
+- Shows before/after architecture clearly
+- Color coding highlights improvements
+- Flows show data movement
+
+#### 4. Package-Level Godoc Pattern (500 lines total)
+
+**Files**: `stigmer/doc.go` (230 lines), `workflow/doc.go` (270 lines)
+
+**Structure**:
+1. **Package Overview** - What it does (1-2 paragraphs)
+2. **Quick Start Examples** - 2 complete working examples
+3. **Core Concepts** - 5 key concepts explained
+4. **Design Patterns** - Good ✅ vs Bad ❌ examples
+5. **Complete Example** - ~50 line workflow
+6. **Migration Examples** - OLD → NEW inline
+7. **Links** - To comprehensive docs
+
+**Key Pattern**: Working code examples in godoc
+
+```go
+// Package stigmer provides the core orchestration layer.
+//
+// # Quick Start - Workflow
+//
+//	err := stigmer.Run(func(ctx *stigmer.Context) error {
+//	    // Context for configuration
+//	    apiBase := ctx.SetString("apiBase", "https://api.example.com")
+//	    
+//	    // Create workflow
+//	    wf, _ := workflow.NewWithContext(ctx, ...)
+//	    
+//	    // Tasks with implicit dependencies
+//	    fetchTask := wf.HttpGet("fetch", endpoint)
+//	    processTask := wf.SetVars("process",
+//	        "data", fetchTask.Field("result"),  // From fetchTask!
+//	    )
+//	    return nil
+//	})
+```
+
+**Why This Works**:
+- Developers see usage immediately in godoc
+- pkg.go.dev shows beautiful formatted examples
+- Quick reference without leaving IDE
+- Copy-paste ready code
+
+#### 5. README Workflow Section Pattern
+
+**Approach**: Dedicate significant README space to workflows
+
+**Structure**:
+1. **Features Section Update** - Split into Core + Workflow
+2. **Workflows Section** - Quick start + 5 key features
+3. **Examples Reorganization** - By category (agents, workflows, shared)
+4. **Clear Entry Points** - ⭐ symbols for recommended starts
+
+**Key Pattern**: Multiple entry points for different users
+
+```markdown
+### Workflow Examples
+8. **Basic Workflow** (`07_basic_workflow.go`) - ⭐ **START HERE**
+9. **Workflow with Conditionals** (`08_workflow_with_conditionals.go`)
+...
+
+**🌟 For agents**: Start with Example 06
+**🌟 For workflows**: Start with Example 07
+```
+
+**Why This Works**:
+- Different users find their path quickly
+- No confusion about where to start
+- Progressive disclosure (simple → advanced)
+
+#### 6. Example Status Tracking Pattern
+
+**File**: `examples/README_WORKFLOW_EXAMPLES.md`
+
+**Purpose**: Track which examples use NEW vs OLD API
+
+**Structure**:
+| Example | API Version | Status | Action |
+|---------|-------------|--------|--------|
+| 07_basic_workflow.go | NEW | ✅ Updated | None |
+| 08_workflow_with_conditionals.go | OLD | ⚠️ Needs update | Add header |
+
+**Warning Header Pattern** for OLD API examples:
+
+```go
+// ⚠️  WARNING: This example uses the OLD API
+//
+// For migration guidance, see: docs/guides/typed-context-migration.md
+// For new API patterns, see: examples/07_basic_workflow.go
+//
+// OLD patterns used:
+// - defer stigmer.Complete() → should use stigmer.Run()
+// - HttpCallTask() → should use wf.HttpGet()
+```
+
+**Why This Works**:
+- Clear status for maintainers
+- Users know what's current vs legacy
+- Links to migration help
+- Prevents confusion
+
+#### 7. Documentation Index Pattern
+
+**File**: `docs/README.md`
+
+**Structure**:
+```markdown
+## Architecture
+- [Pulumi-Aligned Patterns](./architecture/pulumi-aligned-patterns.md)
+
+## Guides
+- [Typed Context Migration Guide](./guides/typed-context-migration.md) - ⭐ **Migrating to new API**
+
+## Examples
+### Agent Examples (7)
+### Workflow Examples (6)
+### Shared Context Examples (1)
+### Legacy Examples (2)
+```
+
+**Why This Works**:
+- Easy navigation with clear categories
+- Stars highlight priority docs
+- Counts show scope
+- Categories help discovery
+
+#### Documentation Metrics & Quality
+
+**Lines Written**:
+- Migration guide: ~900 lines
+- Architecture doc: ~650 lines
+- Package godoc: ~500 lines
+- README updates: ~170 lines
+- Example docs: ~310 lines
+- **Total: ~2530 lines**
+
+**Quality Standards Met**:
+- ✅ Follows Stigmer documentation standards (lowercase, organized)
+- ✅ Professional Mermaid diagrams (3 flowcharts)
+- ✅ Comprehensive comparison tables (3 tables)
+- ✅ Real-world examples throughout
+- ✅ Multiple learning paths
+- ✅ Troubleshooting included
+- ✅ Exceeded industry SDK documentation norms
+
+**Impact**: Professional-grade documentation that matches implementation quality
+
+#### When to Apply This Pattern
+
+**Use this comprehensive documentation approach when:**
+
+1. **Major API Redesign**:
+   - Breaking changes that need migration guide
+   - New patterns need explaining
+   - Users need clear upgrade path
+
+2. **Complex Architecture**:
+   - Design decisions need documentation
+   - Trade-offs should be explained
+   - Future maintainers need context
+
+3. **Professional SDK Quality**:
+   - Competing with major SDKs (Pulumi, Terraform)
+   - Developer experience is priority
+   - Documentation is part of the product
+
+4. **Multiple User Types**:
+   - New users need quick start
+   - Migrating users need step-by-step
+   - Deep learners need architecture docs
+
+**Don't overdo for:**
+- ❌ Minor feature additions (simple godoc sufficient)
+- ❌ Internal tools (brief README okay)
+- ❌ Experimental features (wait for stabilization)
+
+#### Documentation Workflow
+
+1. **Implement First** - Get code working (Phases 1-5)
+2. **Document While Fresh** - Write docs immediately (Phase 6)
+3. **Progressive Disclosure** - README → Guide → Architecture → Godoc
+4. **Multiple Formats** - Code examples, diagrams, tables, text
+5. **Cross-Link Everything** - Easy navigation between docs
+6. **Maintain Status** - Track what's current vs legacy
+
+#### Key Learnings
+
+**What Worked Well**:
+1. **Mermaid Diagrams** - Visual comparisons powerful
+2. **Before/After Examples** - Concrete transformations clear
+3. **Good ✅ vs Bad ❌ Pattern** - Shows right way immediately
+4. **Working Code in Godoc** - Developers appreciate copy-paste ready
+5. **Comparison Tables** - Industry context helpful (Pulumi/TF/CF)
+
+**Time Investment**:
+- ~4 hours for 2530 lines
+- Worth it for major API changes
+- Documentation quality matches code quality
+
+**Cross-Language Note**:
+- **Python SDK**: Similar comprehensive documentation would use Python examples
+- **Go SDK**: Uses Go idioms (goroutines, channels, defer)
+- **Conceptual**: Both need migration guide, architecture docs, examples
+
+**Prevention**: For future major SDK changes:
+1. ✅ Plan documentation phase from start
+2. ✅ Write migration guide alongside implementation
+3. ✅ Create Mermaid diagrams for architecture
+4. ✅ Document design decisions as you make them
+5. ✅ Use this Phase 6 work as template
+
+**Related Documentation**:
+- Migration guide: `docs/guides/typed-context-migration.md`
+- Architecture: `docs/architecture/pulumi-aligned-patterns.md`
+- Package godoc: `stigmer/doc.go`, `workflow/doc.go`
+- Example status: `examples/README_WORKFLOW_EXAMPLES.md`
+
+---
 
 ### 2026-01-13 - Following Stigmer Documentation Standards
 

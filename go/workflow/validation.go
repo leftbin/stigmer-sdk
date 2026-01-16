@@ -21,15 +21,14 @@ func validate(w *Workflow) error {
 		return err
 	}
 
-	// Validate tasks (must have at least one)
+	// Note: We no longer require tasks during workflow creation to support
+	// the Pulumi-style pattern where workflows are created first, then tasks
+	// are added via wf.HttpGet(), wf.SetVars(), etc.
+	//
+	// Task validation will happen during synthesis instead.
 	if len(w.Tasks) == 0 {
-		return NewValidationErrorWithCause(
-			"tasks",
-			"",
-			"min_items",
-			"workflow must have at least one task",
-			ErrNoTasks,
-		)
+		// Allow empty workflows during creation
+		return nil
 	}
 
 	// Validate task names are unique
