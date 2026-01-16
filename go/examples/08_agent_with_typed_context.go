@@ -34,10 +34,10 @@ func main() {
 		agentName := ctx.SetString("agentName", "code-reviewer")
 		baseIconURL := ctx.SetString("baseIconURL", "https://example.com")
 		orgName := ctx.SetString("orgName", "my-organization")
-		
+
 		// Type-safe string concatenation for icon URL
 		iconURL := baseIconURL.Concat("/icons/code-reviewer.png")
-		
+
 		// Create environment variable for GitHub token
 		githubToken, err := environment.New(
 			environment.WithName("GITHUB_TOKEN"),
@@ -47,7 +47,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		
+
 		// Create MCP server for GitHub integration
 		githubMCP, err := mcpserver.Stdio(
 			mcpserver.WithName("github"),
@@ -62,23 +62,23 @@ func main() {
 		// Note: We're using the typed references directly!
 		ag, err := agent.NewWithContext(ctx,
 			// Required fields with typed context
-			agent.WithName(agentName),  // Use typed reference - compile-time checked!
+			agent.WithName(agentName), // Use typed reference - compile-time checked!
 			agent.WithInstructions("Review code and suggest improvements based on best practices, security considerations, and coding standards"),
-			
+
 			// Optional fields with typed context
 			agent.WithDescription("Professional code reviewer with security focus"),
-			agent.WithIconURL(iconURL),  // Use the concatenated StringRef
-			agent.WithOrg(orgName),      // Use typed reference
-			
+			agent.WithIconURL(iconURL), // Use the concatenated StringRef
+			agent.WithOrg(orgName),     // Use typed reference
+
 			// Add skills
 			agent.WithSkills(
 				skill.Platform("coding-best-practices"),
 				skill.Platform("security-review"),
 			),
-			
+
 			// Add MCP servers
 			agent.WithMCPServer(githubMCP),
-			
+
 			// Add environment variables
 			agent.WithEnvironmentVariable(githubToken),
 		)
@@ -90,10 +90,10 @@ func main() {
 		log.Println("Agent will be synthesized automatically on completion")
 		return nil
 	})
-	
+
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+
 	log.Println("✅ Agent created and synthesized successfully!")
 }

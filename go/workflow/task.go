@@ -47,11 +47,124 @@ type Task struct {
 
 	// Flow control (which task executes next)
 	ThenTask string
+
+	// Explicit dependencies (optional, for cases where field references don't capture it)
+	// This is tracked automatically when using TaskFieldRef but can be set explicitly
+	Dependencies []string
 }
 
 // TaskConfig is a marker interface for task configurations.
 type TaskConfig interface {
 	isTaskConfig()
+}
+
+// ============================================================================
+// TaskFieldRef - Typed references to task output fields (Pulumi-style)
+// ============================================================================
+
+// TaskFieldRef represents a typed reference to a specific field in a task's output.
+// This enables Pulumi-style task output references where the origin is always clear.
+//
+// Example:
+//
+//	fetchTask := wf.HttpGet("fetch", apiURL)
+//	title := fetchTask.Field("title")  // Clear: title comes from fetchTask!
+//	processTask := wf.SetVars("process", "postTitle", title)
+//
+// This replaces magic string references:
+//
+//	workflow.FieldRef("title")  // ❌ Where does "title" come from? Unclear!
+//	fetchTask.Field("title")    // ✅ Clear origin - from fetchTask
+type TaskFieldRef struct {
+	taskName  string // Name of the task this field comes from
+	fieldName string // Name of the field in the task output
+}
+
+// Expression returns the JQ expression for this field reference.
+// Implements the Ref interface.
+func (r TaskFieldRef) Expression() string {
+	// Reference format: ${ $context.taskName.fieldName }
+	// This assumes the task has exported its output to context
+	return fmt.Sprintf("${ $context.%s.%s }", r.taskName, r.fieldName)
+}
+
+// Name returns a human-readable name for this reference.
+// Implements the Ref interface.
+func (r TaskFieldRef) Name() string {
+	return fmt.Sprintf("%s.%s", r.taskName, r.fieldName)
+}
+
+// TaskName returns the name of the source task.
+// This is used for dependency tracking.
+func (r TaskFieldRef) TaskName() string {
+	return r.taskName
+}
+
+// FieldName returns the name of the field being referenced.
+func (r TaskFieldRef) FieldName() string {
+	return r.fieldName
+}
+
+// Field creates a typed reference to an output field of this task.
+// This enables Pulumi-style output references with clear origins.
+//
+// Example:
+//
+//	fetchTask := wf.HttpGet("fetch", endpoint)
+//	title := fetchTask.Field("title")  // Clear: from fetchTask
+//	body := fetchTask.Field("body")    // Clear: from fetchTask
+//
+//	processTask := wf.SetVars("process",
+//	    "postTitle", title,
+//	    "postBody", body,
+//	)
+//	// Dependencies are implicit - processTask depends on fetchTask!
+//
+// This replaces the old pattern:
+//
+//	workflow.FieldRef("title")  // ❌ Magic string - where's it from?
+//	fetchTask.Field("title")    // ✅ Clear origin!
+func (t *Task) Field(fieldName string) TaskFieldRef {
+	return TaskFieldRef{
+		taskName:  t.Name,
+		fieldName: fieldName,
+	}
+}
+
+// DependsOn adds explicit dependencies to this task.
+// This is the escape hatch for when implicit dependencies (through field references)
+// don't capture the relationship. Like Pulumi's pulumi.DependsOn().
+//
+// In most cases, dependencies are inferred automatically when you use TaskFieldRef.
+// Only use DependsOn() when:
+//  - Side effects matter (task A must run before task B, but B doesn't use A's output)
+//  - Ordering is important for reasons not captured by data flow
+//
+// Example:
+//
+//	// Implicit dependency (preferred):
+//	processTask := wf.SetVars("process",
+//	    "data", fetchTask.Field("body"),  // Automatic dependency!
+//	)
+//
+//	// Explicit dependency (escape hatch):
+//	cleanupTask := wf.SetVars("cleanup", ...)
+//	cleanupTask.DependsOn(processTask)  // Cleanup must run after process
+func (t *Task) DependsOn(tasks ...*Task) *Task {
+	for _, task := range tasks {
+		// Check if already in dependencies
+		found := false
+		for _, dep := range t.Dependencies {
+			if dep == task.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Dependencies = append(t.Dependencies, task.Name)
+		}
+	}
+	return t
 }
 
 // Export sets the export directive for this task using a low-level expression.
@@ -126,6 +239,11 @@ type SetTaskConfig struct {
 	// Variables to set in workflow state.
 	// Keys are variable names, values can be literals or expressions.
 	Variables map[string]string
+	
+	// ImplicitDependencies tracks task dependencies discovered through TaskFieldRef usage.
+	// This is used during task creation to populate the task's Dependencies field.
+	// Map key is the task name, value is always true (set semantics).
+	ImplicitDependencies map[string]bool
 }
 
 func (*SetTaskConfig) isTaskConfig() {}
@@ -133,6 +251,13 @@ func (*SetTaskConfig) isTaskConfig() {}
 // SetTask creates a new SET task.
 //
 // SET tasks assign variables in workflow state.
+//
+// When using TaskFieldRef values, dependencies are automatically tracked:
+//
+//	fetchTask := wf.HttpGet("fetch", endpoint)
+//	processTask := workflow.SetTask("process",
+//	    workflow.SetVar("title", fetchTask.Field("title")),  // Implicit dependency!
+//	)
 //
 // Example:
 //
@@ -142,18 +267,28 @@ func (*SetTaskConfig) isTaskConfig() {}
 //	)
 func SetTask(name string, opts ...SetTaskOption) *Task {
 	cfg := &SetTaskConfig{
-		Variables: make(map[string]string),
+		Variables:            make(map[string]string),
+		ImplicitDependencies: make(map[string]bool),
 	}
 
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	return &Task{
-		Name:   name,
-		Kind:   TaskKindSet,
-		Config: cfg,
+	// Create task
+	task := &Task{
+		Name:         name,
+		Kind:         TaskKindSet,
+		Config:       cfg,
+		Dependencies: []string{},
 	}
+
+	// Propagate implicit dependencies to task
+	for taskName := range cfg.ImplicitDependencies {
+		task.Dependencies = append(task.Dependencies, taskName)
+	}
+
+	return task
 }
 
 // SetTaskOption is a functional option for configuring SET tasks.
@@ -163,14 +298,26 @@ type SetTaskOption func(*SetTaskConfig)
 // Accepts either a string or a Ref type for the value.
 // For better type safety, consider using SetInt, SetString, SetBool instead.
 //
+// When a TaskFieldRef is used, the dependency is automatically tracked.
+//
 // Examples:
 //
 //	SetVar("apiURL", "https://api.example.com")     // Legacy string
 //	SetVar("apiURL", ctx.SetString("url", "..."))   // Typed context
 //	SetVar("endpoint", apiURL.Concat("/users"))     // StringRef transformation
+//	SetVar("title", fetchTask.Field("title"))       // Implicit dependency on fetchTask!
 func SetVar(key string, value interface{}) SetTaskOption {
 	return func(cfg *SetTaskConfig) {
 		cfg.Variables[key] = toExpression(value)
+		
+		// Track implicit dependency if this is a TaskFieldRef
+		if fieldRef, ok := value.(TaskFieldRef); ok {
+			// Store dependency info in config for later tracking
+			if cfg.ImplicitDependencies == nil {
+				cfg.ImplicitDependencies = make(map[string]bool)
+			}
+			cfg.ImplicitDependencies[fieldRef.TaskName()] = true
+		}
 	}
 }
 
@@ -249,6 +396,9 @@ type HttpCallTaskConfig struct {
 	Headers        map[string]string // HTTP headers
 	Body           map[string]any    // Request body (JSON)
 	TimeoutSeconds int32             // Request timeout in seconds
+	
+	// ImplicitDependencies tracks task dependencies discovered through TaskFieldRef usage.
+	ImplicitDependencies map[string]bool
 }
 
 func (*HttpCallTaskConfig) isTaskConfig() {}
@@ -266,20 +416,30 @@ func (*HttpCallTaskConfig) isTaskConfig() {}
 //	)
 func HttpCallTask(name string, opts ...HttpCallTaskOption) *Task {
 	cfg := &HttpCallTaskConfig{
-		Headers:        make(map[string]string),
-		Body:           make(map[string]any),
-		TimeoutSeconds: 30, // default timeout
+		Headers:              make(map[string]string),
+		Body:                 make(map[string]any),
+		TimeoutSeconds:       30, // default timeout
+		ImplicitDependencies: make(map[string]bool),
 	}
 
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	return &Task{
-		Name:   name,
-		Kind:   TaskKindHttpCall,
-		Config: cfg,
+	// Create task
+	task := &Task{
+		Name:         name,
+		Kind:         TaskKindHttpCall,
+		Config:       cfg,
+		Dependencies: []string{},
 	}
+
+	// Propagate implicit dependencies to task
+	for taskName := range cfg.ImplicitDependencies {
+		task.Dependencies = append(task.Dependencies, taskName)
+	}
+
+	return task
 }
 
 // HttpCallTaskOption is a functional option for configuring HTTP_CALL tasks.
@@ -352,16 +512,27 @@ func WithHTTPOptions() HttpCallTaskOption {
 }
 
 // WithURI sets the HTTP URI.
-// Accepts either a string or a Ref type (e.g., StringRef from context).
+// Accepts either a string or a Ref type (e.g., StringRef from context, TaskFieldRef).
+//
+// When a TaskFieldRef is used, the dependency is automatically tracked.
 //
 // Examples:
 //
 //	WithURI("https://api.example.com")                     // Legacy string
 //	WithURI(ctx.SetString("apiURL", "https://..."))        // Typed context
 //	WithURI(apiURL.Concat("/users"))                       // StringRef transformation
+//	WithURI(fetchTask.Field("nextURL"))                    // Implicit dependency on fetchTask!
 func WithURI(uri interface{}) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
 		cfg.URI = toExpression(uri)
+		
+		// Track implicit dependency if this is a TaskFieldRef
+		if fieldRef, ok := uri.(TaskFieldRef); ok {
+			if cfg.ImplicitDependencies == nil {
+				cfg.ImplicitDependencies = make(map[string]bool)
+			}
+			cfg.ImplicitDependencies[fieldRef.TaskName()] = true
+		}
 	}
 }
 
@@ -377,6 +548,19 @@ func WithHeader(key string, value interface{}) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
 		cfg.Headers[key] = toExpression(value)
 	}
+}
+
+// Header is a convenience alias for WithHeader for cleaner syntax.
+// Use this in the new Pulumi-style builders for brevity.
+//
+// Example:
+//
+//	wf.HttpGet("fetch", endpoint,
+//	    workflow.Header("Content-Type", "application/json"),  // Clean!
+//	    workflow.Header("Authorization", token),
+//	)
+func Header(key string, value interface{}) HttpCallTaskOption {
+	return WithHeader(key, value)
 }
 
 // WithHeaders adds multiple HTTP headers.
@@ -406,6 +590,18 @@ func WithTimeout(seconds interface{}) HttpCallTaskOption {
 	return func(cfg *HttpCallTaskConfig) {
 		cfg.TimeoutSeconds = toInt32(seconds)
 	}
+}
+
+// Timeout is a convenience alias for WithTimeout for cleaner syntax.
+// Use this in the new Pulumi-style builders for brevity.
+//
+// Example:
+//
+//	wf.HttpGet("fetch", endpoint,
+//	    workflow.Timeout(30),  // Clean!
+//	)
+func Timeout(seconds interface{}) HttpCallTaskOption {
+	return WithTimeout(seconds)
 }
 
 // ============================================================================

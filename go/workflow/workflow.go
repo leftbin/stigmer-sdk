@@ -384,6 +384,171 @@ func (w *Workflow) AddEnvironmentVariables(variables ...environment.Variable) *W
 	return w
 }
 
+// ============================================================================
+// Convenience Methods (Pulumi-Style Task Builders)
+// ============================================================================
+
+// HttpGet creates an HTTP GET task and adds it to the workflow.
+// This is a clean, Pulumi-style builder for the most common HTTP pattern.
+//
+// The task is automatically added to the workflow and supports implicit dependencies
+// when using TaskFieldRef values.
+//
+// Example:
+//
+//	wf := workflow.New(ctx, ...)
+//	endpoint := ctx.String("apiBase", "https://api.example.com")
+//	
+//	// Clean, one-line GET request
+//	fetchTask := wf.HttpGet("fetch", endpoint.Concat("/posts/1"),
+//	    workflow.Header("Content-Type", "application/json"),
+//	    workflow.Timeout(30),
+//	)
+//	
+//	// Use task outputs with clear origin
+//	processTask := wf.SetVars("process",
+//	    "title", fetchTask.Field("title"),  // Implicit dependency!
+//	)
+func (w *Workflow) HttpGet(name string, uri interface{}, opts ...HttpCallTaskOption) *Task {
+	// Prepend GET method and URI to options
+	allOpts := []HttpCallTaskOption{
+		WithHTTPGet(),
+		WithURI(uri),
+	}
+	allOpts = append(allOpts, opts...)
+	
+	task := HttpCallTask(name, allOpts...)
+	w.AddTask(task)
+	return task
+}
+
+// HttpPost creates an HTTP POST task and adds it to the workflow.
+// This is a clean, Pulumi-style builder for POST requests.
+//
+// Example:
+//
+//	wf := workflow.New(ctx, ...)
+//	createTask := wf.HttpPost("createUser", apiURL.Concat("/users"),
+//	    workflow.WithBody(map[string]any{
+//	        "name": "John Doe",
+//	        "email": "john@example.com",
+//	    }),
+//	    workflow.Header("Authorization", token),
+//	)
+func (w *Workflow) HttpPost(name string, uri interface{}, opts ...HttpCallTaskOption) *Task {
+	allOpts := []HttpCallTaskOption{
+		WithHTTPPost(),
+		WithURI(uri),
+	}
+	allOpts = append(allOpts, opts...)
+	
+	task := HttpCallTask(name, allOpts...)
+	w.AddTask(task)
+	return task
+}
+
+// HttpPut creates an HTTP PUT task and adds it to the workflow.
+// This is a clean, Pulumi-style builder for PUT requests.
+//
+// Example:
+//
+//	updateTask := wf.HttpPut("updateUser", userURL,
+//	    workflow.WithBody(map[string]any{"status": "active"}),
+//	)
+func (w *Workflow) HttpPut(name string, uri interface{}, opts ...HttpCallTaskOption) *Task {
+	allOpts := []HttpCallTaskOption{
+		WithHTTPPut(),
+		WithURI(uri),
+	}
+	allOpts = append(allOpts, opts...)
+	
+	task := HttpCallTask(name, allOpts...)
+	w.AddTask(task)
+	return task
+}
+
+// HttpPatch creates an HTTP PATCH task and adds it to the workflow.
+// This is a clean, Pulumi-style builder for PATCH requests.
+//
+// Example:
+//
+//	patchTask := wf.HttpPatch("patchUser", userURL,
+//	    workflow.WithBody(map[string]any{"email": "newemail@example.com"}),
+//	)
+func (w *Workflow) HttpPatch(name string, uri interface{}, opts ...HttpCallTaskOption) *Task {
+	allOpts := []HttpCallTaskOption{
+		WithHTTPPatch(),
+		WithURI(uri),
+	}
+	allOpts = append(allOpts, opts...)
+	
+	task := HttpCallTask(name, allOpts...)
+	w.AddTask(task)
+	return task
+}
+
+// HttpDelete creates an HTTP DELETE task and adds it to the workflow.
+// This is a clean, Pulumi-style builder for DELETE requests.
+//
+// Example:
+//
+//	deleteTask := wf.HttpDelete("deleteUser", userURL,
+//	    workflow.Header("Authorization", token),
+//	)
+func (w *Workflow) HttpDelete(name string, uri interface{}, opts ...HttpCallTaskOption) *Task {
+	allOpts := []HttpCallTaskOption{
+		WithHTTPDelete(),
+		WithURI(uri),
+	}
+	allOpts = append(allOpts, opts...)
+	
+	task := HttpCallTask(name, allOpts...)
+	w.AddTask(task)
+	return task
+}
+
+// SetVars creates a SET task for setting multiple variables and adds it to the workflow.
+// This is a clean, Pulumi-style builder that accepts key-value pairs.
+//
+// Arguments are provided as alternating key-value pairs:
+//
+//	wf.SetVars("taskName", "key1", value1, "key2", value2, ...)
+//
+// When using TaskFieldRef values, dependencies are automatically tracked.
+//
+// Example:
+//
+//	wf := workflow.New(ctx, ...)
+//	fetchTask := wf.HttpGet("fetch", endpoint)
+//	
+//	// Clean, concise variable setting with implicit dependencies
+//	processTask := wf.SetVars("process",
+//	    "title", fetchTask.Field("title"),  // Implicit dependency!
+//	    "body", fetchTask.Field("body"),    // Clear origin!
+//	    "status", "success",
+//	)
+func (w *Workflow) SetVars(name string, keyValuePairs ...interface{}) *Task {
+	// Validate even number of arguments
+	if len(keyValuePairs)%2 != 0 {
+		panic("SetVars requires an even number of arguments (key-value pairs)")
+	}
+	
+	// Build SetVar options from pairs
+	opts := make([]SetTaskOption, 0, len(keyValuePairs)/2)
+	for i := 0; i < len(keyValuePairs); i += 2 {
+		key, ok := keyValuePairs[i].(string)
+		if !ok {
+			panic(fmt.Sprintf("SetVars key at index %d must be a string, got %T", i, keyValuePairs[i]))
+		}
+		value := keyValuePairs[i+1]
+		opts = append(opts, SetVar(key, value))
+	}
+	
+	task := SetTask(name, opts...)
+	w.AddTask(task)
+	return task
+}
+
 // String returns a string representation of the Workflow.
 func (w *Workflow) String() string {
 	return "Workflow(namespace=" + w.Document.Namespace + ", name=" + w.Document.Name + ", version=" + w.Document.Version + ")"

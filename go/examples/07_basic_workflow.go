@@ -11,26 +11,28 @@ import (
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
-// This example demonstrates creating a workflow with typed context variables.
+// This example demonstrates creating a workflow with Pulumi-aligned patterns.
 //
 // The workflow:
-// 1. Initializes variables using typed context (SetString, SetInt)
-// 2. Makes an HTTP GET request using context variables
-// 3. Processes the response using field references
+// 1. Uses context ONLY for configuration (not internal data flow)
+// 2. Makes an HTTP GET request using clean builders
+// 3. Processes the response using clear task output references
+// 4. Has implicit dependencies (no manual ThenRef needed!)
 //
 // Key features demonstrated:
 // - stigmer.Run() pattern for automatic context management
-// - Typed context variables (apiURL, retryCount)
-// - Compile-time checked references (no string typos)
-// - IDE autocomplete for context variables
-// - Type-safe task builders accepting Ref types
-// - Automatic synthesis on completion
+// - Context used ONLY for config (like Pulumi's Config)
+// - Clean HTTP builders: wf.HttpGet()
+// - Clear task output references: fetchTask.Field("title")
+// - Implicit dependencies through field references
+// - No ExportAll() needed - outputs always available
+// - Professional, Pulumi-like code style
 func main() {
 	// Use stigmer.Run() for automatic context and synthesis management
 	err := stigmeragent.Run(func(ctx *stigmeragent.Context) error {
-		// Create typed context variables (compile-time checked!)
-		apiURL := ctx.SetString("apiURL", "https://jsonplaceholder.typicode.com")
-		retryCount := ctx.SetInt("retryCount", 0)
+		// Context: ONLY for shared configuration (like Pulumi's Config)
+		apiBase := ctx.SetString("apiBase", "https://jsonplaceholder.typicode.com")
+		orgName := ctx.SetString("org", "my-org")
 
 		// Create environment variable for API token
 		apiToken, err := environment.New(
@@ -42,36 +44,7 @@ func main() {
 			return err
 		}
 
-		// Task 1: Initialize variables using context references
-		// Note: We're using the typed references directly!
-		initTask := workflow.SetTask("initialize",
-			workflow.SetVar("currentURL", apiURL),         // Use typed reference
-			workflow.SetVar("currentRetries", retryCount), // Use typed reference
-		)
-
-		// Task 2: Fetch data from API using typed context variable
-		// The apiURL reference is compile-time checked - no string typos possible!
-		endpoint := apiURL.Concat("/posts/1") // Type-safe string concatenation
-
-		fetchTask := workflow.HttpCallTask("fetchData",
-			workflow.WithHTTPGet(),
-			workflow.WithURI(endpoint), // Use the typed reference
-			workflow.WithHeader("Content-Type", "application/json"),
-			workflow.WithTimeout(30),
-		).ExportAll()
-
-		// Task 3: Process the response using field references
-		processTask := workflow.SetTask("processResponse",
-			workflow.SetVar("postTitle", workflow.FieldRef("title")),
-			workflow.SetVar("postBody", workflow.FieldRef("body")),
-			workflow.SetString("status", "success"),
-		)
-
-		// Connect tasks using type-safe references (refactoring-safe!)
-		initTask.ThenRef(fetchTask)
-		fetchTask.ThenRef(processTask)
-
-		// Create the workflow with typed context
+		// Create workflow with context
 		wf, err := workflow.NewWithContext(ctx,
 			// Required metadata
 			workflow.WithNamespace("data-processing"),
@@ -79,18 +52,40 @@ func main() {
 
 			// Optional fields
 			workflow.WithVersion("1.0.0"),
-			workflow.WithDescription("Fetch data from an external API using typed context"),
-			workflow.WithOrg("my-org"),
+			workflow.WithDescription("Fetch data from an external API using Pulumi-aligned patterns"),
+			workflow.WithOrg(orgName), // Use context config
 			workflow.WithEnvironmentVariable(apiToken),
-
-			// Tasks
-			workflow.WithTasks(initTask, fetchTask, processTask),
 		)
 		if err != nil {
 			return err
 		}
 
+		// Build endpoint URL using context config
+		endpoint := apiBase.Concat("/posts/1")
+
+		// Task 1: Fetch data from API (clean, one-liner!)
+		// No ExportAll() needed - outputs are always available
+		fetchTask := wf.HttpGet("fetchData", endpoint,
+			workflow.Header("Content-Type", "application/json"),
+			workflow.Timeout(30),
+		)
+
+		// Task 2: Process response using DIRECT task references
+		// Dependencies are implicit - no ThenRef needed!
+		// Clear origin: title and body come from fetchTask
+		processTask := wf.SetVars("processResponse",
+			"postTitle", fetchTask.Field("title"), // ✅ Clear: from fetchTask!
+			"postBody", fetchTask.Field("body"), // ✅ Clear: from fetchTask!
+			"status", "success",
+		)
+
+		// No manual dependency management needed!
+		// processTask automatically depends on fetchTask because it uses fetchTask.Field()
+
 		log.Printf("Created workflow: %s", wf)
+		log.Printf("Tasks: %d", len(wf.Tasks))
+		log.Printf("  - %s (HTTP GET)", fetchTask.Name)
+		log.Printf("  - %s (depends on %s implicitly)", processTask.Name, fetchTask.Name)
 		log.Println("Workflow will be synthesized automatically on completion")
 		return nil
 	})
