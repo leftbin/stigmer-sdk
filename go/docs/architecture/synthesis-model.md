@@ -1,14 +1,14 @@
-# Synthesis Model: Why `defer stigmeragent.Complete()` is Required
+# Synthesis Model: Why `defer stigmer.Complete()` is Required
 
 ## TL;DR
 
 Unlike Python (which has `atexit` hooks), **Go doesn't provide automatic program exit callbacks**. This means we need one line of boilerplate:
 
 ```go
-import stigmeragent "github.com/leftbin/stigmer-sdk/go"
+import stigmer "github.com/leftbin/stigmer-sdk/go"
 
 func main() {
-    defer stigmeragent.Complete()  // ← Required in Go, not in Python/TypeScript
+    defer stigmer.Complete()  // ← Required in Go, not in Python/TypeScript
     
     agent.New(...)
 }
@@ -78,11 +78,11 @@ The Python SDK uses `atexit.register(_auto_synth)` to automatically write `manif
 We chose the cleanest possible API given Go's constraints:
 
 ```go
-import stigmeragent "github.com/leftbin/stigmer-sdk/go"
+import stigmer "github.com/leftbin/stigmer-sdk/go"
 import "github.com/leftbin/stigmer-sdk/go/agent"
 
 func main() {
-    defer stigmeragent.Complete()  // Single line, clear intent
+    defer stigmer.Complete()  // Single line, clear intent
     
     agent.New(
         agent.WithName("code-reviewer"),
@@ -101,7 +101,7 @@ func main() {
 
 ### Alternative: What If We Didn't Do This?
 
-Without `defer stigmeragent.Complete()`, users would need:
+Without `defer stigmer.Complete()`, users would need:
 
 ```go
 // ❌ Verbose manual approach
@@ -139,7 +139,7 @@ func main() {
 
 ❌ **Zero boilerplate** - Go requires `defer` line  
 
-But we made it as close as possible: `defer stigmeragent.Complete()` is **6 words**.
+But we made it as close as possible: `defer stigmer.Complete()` is **6 words**.
 
 ---
 
@@ -158,7 +158,7 @@ func init() {
 }
 ```
 
-Users on Go 1.24+ won't need `defer stigmeragent.Complete()` at all.
+Users on Go 1.24+ won't need `defer stigmer.Complete()` at all.
 
 **Until then:** The one-line defer is the best we can do.
 
@@ -182,7 +182,7 @@ Users on Go 1.24+ won't need `defer stigmeragent.Complete()` at all.
 **A:** The CLI will fail with:
 ```
 Error: manifest.pb not found
-Hint: Add 'defer stigmeragent.Complete()' to your main() function
+Hint: Add 'defer stigmer.Complete()' to your main() function
 ```
 
 ### Q: Why not detect missing defer and print a warning?
@@ -201,12 +201,12 @@ The original design describes the **ideal** UX (zero boilerplate). We implemente
 
 - ✅ Global registry (automatic agent registration)
 - ✅ Environment-driven synthesis (CLI sets `STIGMER_OUT_DIR`)
-- ✅ Clean API (`defer stigmeragent.Complete()` - 1 line)
+- ✅ Clean API (`defer stigmer.Complete()` - 1 line)
 - ⚠️ Minimal boilerplate (required by Go's language design)
 
 **This is not a compromise in implementation quality - it's a reflection of Go's language philosophy.**
 
-Go values **explicit control flow** over **implicit magic**. Our `defer stigmeragent.Complete()` follows Go's design principles while staying as close to the original vision as possible.
+Go values **explicit control flow** over **implicit magic**. Our `defer stigmer.Complete()` follows Go's design principles while staying as close to the original vision as possible.
 
 ---
 

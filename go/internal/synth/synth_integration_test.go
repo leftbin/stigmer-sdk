@@ -19,9 +19,10 @@ import (
 
 // TestAutoSynth_DryRunMode verifies dry-run mode (no STIGMER_OUT_DIR).
 func TestAutoSynth_DryRunMode(t *testing.T) {
-	// Reset registry
+	// Reset registry and synthesis state
 	defer registry.Global().Clear()
 	registry.Global().Clear()
+	ResetForTesting()
 
 	// Ensure STIGMER_OUT_DIR is not set
 	os.Unsetenv("STIGMER_OUT_DIR")
@@ -54,9 +55,10 @@ func TestAutoSynth_DryRunMode(t *testing.T) {
 
 // TestAutoSynth_SynthesisMode verifies synthesis mode (with STIGMER_OUT_DIR).
 func TestAutoSynth_SynthesisMode(t *testing.T) {
-	// Reset registry
+	// Reset registry and synthesis state
 	defer registry.Global().Clear()
 	registry.Global().Clear()
+	ResetForTesting()
 
 	// Create temp directory for output
 	tempDir := t.TempDir()
@@ -120,19 +122,19 @@ func TestAutoSynth_SynthesisMode(t *testing.T) {
 		t.Fatal("Agent should be registered in global registry")
 	}
 
-	// Call AutoSynth (should write manifest.pb)
+	// Call AutoSynth (should write agent-manifest.pb)
 	AutoSynth()
 
-	// Verify manifest.pb was created
-	manifestPath := filepath.Join(tempDir, "manifest.pb")
+	// Verify agent-manifest.pb was created
+	manifestPath := filepath.Join(tempDir, "agent-manifest.pb")
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-		t.Fatalf("manifest.pb was not created at %s", manifestPath)
+		t.Fatalf("agent-manifest.pb was not created at %s", manifestPath)
 	}
 
-	// Read and verify manifest.pb content
+	// Read and verify agent-manifest.pb content
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		t.Fatalf("Failed to read manifest.pb: %v", err)
+		t.Fatalf("Failed to read agent-manifest.pb: %v", err)
 	}
 
 	// Deserialize manifest
@@ -213,9 +215,10 @@ func TestAutoSynth_SynthesisMode(t *testing.T) {
 
 // TestMultipleAgents_AllSynthesized verifies multi-agent support.
 func TestMultipleAgents_AllSynthesized(t *testing.T) {
-	// Reset registry
+	// Reset registry and synthesis state
 	defer registry.Global().Clear()
 	registry.Global().Clear()
+	ResetForTesting()
 
 	// Create temp directory for output
 	tempDir := t.TempDir()
@@ -261,7 +264,7 @@ func TestMultipleAgents_AllSynthesized(t *testing.T) {
 	AutoSynth()
 
 	// Read manifest
-	manifestPath := filepath.Join(tempDir, "manifest.pb")
+	manifestPath := filepath.Join(tempDir, "agent-manifest.pb")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("Failed to read manifest.pb: %v", err)
@@ -304,6 +307,7 @@ func TestConcurrentSynthesis_IsolatedDirectories(t *testing.T) {
 	t.Run("session-1", func(t *testing.T) {
 		registry.Global().Clear()
 		defer registry.Global().Clear()
+		ResetForTesting()
 
 		tempDir1 := t.TempDir()
 		os.Setenv("STIGMER_OUT_DIR", tempDir1)
@@ -317,7 +321,7 @@ func TestConcurrentSynthesis_IsolatedDirectories(t *testing.T) {
 		AutoSynth()
 
 		// Verify manifest in session 1 directory
-		manifestPath := filepath.Join(tempDir1, "manifest.pb")
+		manifestPath := filepath.Join(tempDir1, "agent-manifest.pb")
 		data, _ := os.ReadFile(manifestPath)
 		var manifest agentv1.AgentManifest
 		proto.Unmarshal(data, &manifest)
@@ -336,6 +340,7 @@ func TestConcurrentSynthesis_IsolatedDirectories(t *testing.T) {
 	t.Run("session-2", func(t *testing.T) {
 		registry.Global().Clear()
 		defer registry.Global().Clear()
+		ResetForTesting()
 
 		tempDir2 := t.TempDir()
 		os.Setenv("STIGMER_OUT_DIR", tempDir2)
@@ -349,7 +354,7 @@ func TestConcurrentSynthesis_IsolatedDirectories(t *testing.T) {
 		AutoSynth()
 
 		// Verify manifest in session 2 directory
-		manifestPath := filepath.Join(tempDir2, "manifest.pb")
+		manifestPath := filepath.Join(tempDir2, "agent-manifest.pb")
 		data, _ := os.ReadFile(manifestPath)
 		var manifest agentv1.AgentManifest
 		proto.Unmarshal(data, &manifest)

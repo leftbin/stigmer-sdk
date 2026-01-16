@@ -9,9 +9,9 @@ import (
 
 // Context is a minimal interface that represents a stigmer context.
 // This allows the workflow package to work with contexts without importing
-// the stigmeragent package (avoiding import cycles).
+// the stigmer package (avoiding import cycles).
 //
-// The stigmeragent.Context type implements this interface.
+// The stigmer.Context type implements this interface.
 type Context interface {
 	RegisterWorkflow(*Workflow)
 }
@@ -33,7 +33,7 @@ type Context interface {
 //
 // Or use with typed context (recommended):
 //
-//	stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+//	stigmer.Run(func(ctx *stigmer.Context) error {
 //	    wf, err := workflow.New(ctx,
 //	        workflow.WithNamespace("my-org"),
 //	        workflow.WithName("data-pipeline"),
@@ -66,7 +66,7 @@ type Option func(*Workflow) error
 // New creates a new Workflow with the given options.
 //
 // The workflow is automatically registered in the global registry for synthesis.
-// When the program exits and defer stigmeragent.Complete() is called, this workflow
+// When the program exits and defer stigmer.Complete() is called, this workflow
 // will be converted to a manifest proto and written to disk.
 //
 // Required options:
@@ -139,7 +139,7 @@ func New(opts ...Option) (*Workflow, error) {
 //
 // Example:
 //
-//	stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+//	stigmer.Run(func(ctx *stigmer.Context) error {
 //	    wf, err := workflow.NewWithContext(ctx,
 //	        workflow.WithNamespace("data-processing"),
 //	        workflow.WithName("daily-sync"),

@@ -1,10 +1,11 @@
-package stigmeragent
+package stigmer
 
 import (
 	"fmt"
 	"sync"
 
 	"github.com/leftbin/stigmer-sdk/go/agent"
+	"github.com/leftbin/stigmer-sdk/go/internal/registry"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -17,7 +18,7 @@ import (
 //
 // Example:
 //
-//	stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+//	stigmer.Run(func(ctx *stigmer.Context) error {
 //	    apiURL := ctx.SetString("apiURL", "https://api.example.com")
 //	    
 //	    wf, _ := workflow.New(ctx, ...)
@@ -57,7 +58,7 @@ func newContext() *Context {
 //
 // Example (testing):
 //
-//	ctx := stigmeragent.NewContext()
+//	ctx := stigmer.NewContext()
 //	apiURL := ctx.SetString("apiURL", "https://api.example.com")
 func NewContext() *Context {
 	return newContext()
@@ -275,12 +276,19 @@ func (c *Context) Synthesize() error {
 		return fmt.Errorf("context already synthesized")
 	}
 
-	// TODO: Implement synthesis logic
-	// This will:
-	// 1. Convert all workflows to proto manifests
-	// 2. Convert all agents to proto manifests
-	// 3. Inject context variables into manifests
-	// 4. Write manifests to disk
+	// Register all workflows and agents with the global registry
+	// so that the synthesis system can find them
+	reg := registry.Global()
+	for _, wf := range c.workflows {
+		reg.RegisterWorkflow(wf)
+	}
+	for _, ag := range c.agents {
+		reg.RegisterAgent(ag)
+	}
+
+	// Trigger synthesis via the internal synth package
+	// This handles the actual conversion to proto and writing to disk
+	Complete()
 
 	c.synthesized = true
 	return nil
@@ -300,7 +308,7 @@ func (c *Context) Synthesize() error {
 // Example:
 //
 //	func main() {
-//	    err := stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+//	    err := stigmer.Run(func(ctx *stigmer.Context) error {
 //	        apiURL := ctx.SetString("apiURL", "https://api.example.com")
 //	        
 //	        wf, err := workflow.New(ctx,

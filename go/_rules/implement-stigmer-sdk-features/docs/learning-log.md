@@ -40,7 +40,7 @@ This log captures all learnings, discoveries, and solutions from implementing an
 
 ```go
 // New pattern - Pulumi-style
-stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+stigmer.Run(func(ctx *stigmer.Context) error {
     // Create typed variables
     apiURL := ctx.SetString("apiURL", "https://api.example.com")
     retries := ctx.SetInt("retries", 3)
@@ -66,7 +66,7 @@ stigmeragent.Run(func(ctx *stigmeragent.Context) error {
 
 #### Implementation Components
 
-**1. Context Object** (`stigmeragent.Context`):
+**1. Context Object** (`stigmer.Context`):
 ```go
 type Context struct {
     variables map[string]Ref           // Typed variable storage
@@ -168,7 +168,7 @@ type Context interface {
     RegisterAgent(*Agent)
 }
 
-// stigmeragent.Context implements both
+// stigmer.Context implements both
 type Context struct { ... }
 func (c *Context) RegisterWorkflow(wf *workflow.Workflow) { ... }
 func (c *Context) RegisterAgent(ag *agent.Agent) { ... }
@@ -218,7 +218,7 @@ wf, _ := workflow.New(
 )
 
 // New way - opt-in
-stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+stigmer.Run(func(ctx *stigmer.Context) error {
     apiURL := ctx.SetString("apiURL", "https://api.example.com")
     
     wf, _ := workflow.NewWithContext(ctx,
@@ -249,7 +249,7 @@ stigmeragent.Run(func(ctx *stigmeragent.Context) error {
 ```go
 // Test both old and new APIs work
 func TestTaskBuilder_WithURIStringRef(t *testing.T) {
-    ctx := stigmeragent.NewContext()
+    ctx := stigmer.NewContext()
     apiURL := ctx.SetString("apiURL", "https://api.example.com")
     
     task := workflow.HttpCallTask("fetch",
@@ -326,10 +326,10 @@ workflow.WithURI(apiURL)  // Generates expression
 **❌ Mixing Contexts**:
 ```go
 // WRONG - different contexts
-stigmeragent.Run(func(ctx1 *stigmeragent.Context) error {
+stigmer.Run(func(ctx1 *stigmer.Context) error {
     apiURL := ctx1.SetString("apiURL", "...")
     
-    stigmeragent.Run(func(ctx2 *stigmeragent.Context) error {
+    stigmer.Run(func(ctx2 *stigmer.Context) error {
         // Can't use apiURL from ctx1 here
         workflow.NewWithContext(ctx2, ...)  // Won't have apiURL
         return nil
@@ -342,7 +342,7 @@ stigmeragent.Run(func(ctx1 *stigmeragent.Context) error {
 **✅ Single Context per Run**:
 ```go
 // CORRECT - one context for all resources
-stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+stigmer.Run(func(ctx *stigmer.Context) error {
     apiURL := ctx.SetString("apiURL", "...")
     
     wf, _ := workflow.NewWithContext(ctx, ...)  // Has apiURL
@@ -700,7 +700,7 @@ func Run(fn func(*Context) error) error {
 
 // User code
 func main() {
-    err := stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+    err := stigmer.Run(func(ctx *stigmer.Context) error {
         // Create variables
         apiURL := ctx.SetString("apiURL", "https://api.example.com")
         
@@ -2207,7 +2207,7 @@ func deployFromManifest(path string) error {
 ```go
 // SDK can define multiple resources
 func main() {
-    defer stigmeragent.Complete()
+    defer stigmer.Complete()
     
     // Multiple agents
     agent1 := agent.New(...)
@@ -3416,7 +3416,7 @@ func ToManifest(a *agent.Agent) {...}  // synth → agent
 
 // ✅ AFTER: Root package breaks cycle
 // synthesis.go (root package)
-package stigmeragent
+package stigmer
 
 import "github.com/leftbin/stigmer-sdk/go/internal/synth"
 
@@ -3458,11 +3458,11 @@ After (NO CYCLE):
 **Usage Pattern**:
 
 ```go
-import stigmeragent "github.com/leftbin/stigmer-sdk/go"  // Root
+import stigmer "github.com/leftbin/stigmer-sdk/go"  // Root
 import "github.com/leftbin/stigmer-sdk/go/agent"         // Subpackage
 
 func main() {
-    defer stigmeragent.Complete()  // Root package function
+    defer stigmer.Complete()  // Root package function
     
     agent.New(...)  // Subpackage function
 }
@@ -3491,7 +3491,7 @@ go build ./...
 
 ### 2026-01-13 - Go Language Constraints: No atexit Hooks
 
-**Problem**: User questioned why Go SDK requires `defer stigmeragent.Complete()` when the original design envisioned zero-boilerplate synthesis (like Python's `atexit` hooks).
+**Problem**: User questioned why Go SDK requires `defer stigmer.Complete()` when the original design envisioned zero-boilerplate synthesis (like Python's `atexit` hooks).
 
 **Root Cause**:
 - **Python has `atexit.register()`** - automatically runs functions on exit
@@ -3536,10 +3536,10 @@ go build ./...
 
 ```go
 // Best possible API given Go's constraints
-import stigmeragent "github.com/leftbin/stigmer-sdk/go"
+import stigmer "github.com/leftbin/stigmer-sdk/go"
 
 func main() {
-    defer stigmeragent.Complete()  // ONE line of boilerplate
+    defer stigmer.Complete()  // ONE line of boilerplate
     
     agent.New(...)  // Rest is clean
 }
@@ -3591,7 +3591,7 @@ Created comprehensive documentation explaining this:
 ```go
 //go:build go1.24
 
-package stigmeragent
+package stigmer
 
 import "runtime"
 
@@ -3622,7 +3622,7 @@ When designing multi-language SDKs, recognize that not all languages have the sa
 **Root Cause**:
 - **Two different usage contexts**: CLI-driven vs standalone SDK
 - **CLI examples**: No synthesis needed (CLI's "Copy & Patch" injects it automatically)
-- **SDK standalone examples**: Need explicit `defer stigmeragent.Complete()`
+- **SDK standalone examples**: Need explicit `defer stigmer.Complete()`
 - **Inconsistency**: Some SDK examples had synthesis, others missing it
 - **Unclear documentation**: When synthesis is needed vs not needed
 
@@ -3638,11 +3638,11 @@ When designing multi-language SDKs, recognize that not all languages have the sa
 
 ```go
 // ✅ ALL SDK examples now use consistent pattern
-import stigmeragent "github.com/leftbin/stigmer-sdk/go"
+import stigmer "github.com/leftbin/stigmer-sdk/go"
 import "github.com/leftbin/stigmer-sdk/go/agent"      // or workflow
 
 func main() {
-	defer stigmeragent.Complete()
+	defer stigmer.Complete()
 	
 	// Agent or workflow definition...
 	agent.New(...) // or workflow.New(...)
@@ -3654,7 +3654,7 @@ func main() {
 | Context | Synthesis Needed? | Why |
 |---------|------------------|-----|
 | **CLI-driven** (`stigmer up main.go`) | ❌ NO | CLI injects automatically via "Copy & Patch" |
-| **Standalone** (`go run main.go`) | ✅ YES | Must call `defer stigmeragent.Complete()` |
+| **Standalone** (`go run main.go`) | ✅ YES | Must call `defer stigmer.Complete()` |
 
 **CLI "Copy & Patch" Architecture** (for reference):
 1. CLI copies user's project to sandbox
@@ -3662,20 +3662,20 @@ func main() {
 3. Generates `stigmer_bootstrap_gen.go` with:
    ```go
    func main() {
-       defer stigmeragent.Complete()  // ← Injected!
+       defer stigmer.Complete()  // ← Injected!
        _stigmer_user_main()
    }
    ```
 4. Runs patched code with `STIGMER_OUT_DIR` set
 
 **Files Fixed (11 examples)**:
-- All 6 agent examples: Added `defer stigmeragent.Complete()`
-- All 5 workflow examples: Fixed import to use `stigmeragent` (not `synthesis`)
+- All 6 agent examples: Added `defer stigmer.Complete()`
+- All 5 workflow examples: Fixed import to use `stigmer` (not `synthesis`)
 
 **Documentation Added**:
 ```go
 // Note: When using the SDK standalone (without CLI), you must call 
-// defer stigmeragent.Complete() to enable manifest generation. The CLI's 
+// defer stigmer.Complete() to enable manifest generation. The CLI's 
 // "Copy & Patch" architecture automatically injects this when running via 
 // `stigmer up`, so CLI-based projects don't need it.
 ```
@@ -3689,7 +3689,7 @@ func main() {
 
 **Pattern Established**: SDK examples should always be complete, runnable programs:
 - Import root package for synthesis control
-- Include `defer stigmeragent.Complete()`
+- Include `defer stigmer.Complete()`
 - Document that CLI handles this automatically
 - Show both contexts in README
 
@@ -3703,7 +3703,7 @@ func main() {
 
 **Cross-Language Reference**:
 - **Python approach**: SDK uses `atexit.register()` - truly automatic
-- **Go approach**: Requires `defer stigmeragent.Complete()` - one line
+- **Go approach**: Requires `defer stigmer.Complete()` - one line
 - **CLI universal**: All languages benefit from "Copy & Patch" injection
 - **Pattern**: Examples show standalone usage, CLI documentation explains injection
 

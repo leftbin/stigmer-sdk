@@ -6,7 +6,7 @@ package main
 import (
 	"log"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/environment"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
@@ -29,7 +29,7 @@ import (
 // - Professional, Pulumi-like code style
 func main() {
 	// Use stigmer.Run() for automatic context and synthesis management
-	err := stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+	err := stigmer.Run(func(ctx *stigmer.Context) error {
 		// Context: ONLY for shared configuration (like Pulumi's Config)
 		apiBase := ctx.SetString("apiBase", "https://jsonplaceholder.typicode.com")
 		orgName := ctx.SetString("org", "my-org")

@@ -9,7 +9,7 @@ package main
 import (
 	"log"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/environment"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
@@ -31,7 +31,7 @@ import (
 // - High-level helpers (ExportAll, VarRef, FieldRef, Interpolate)
 func main() {
 	// Enable auto-synthesis - workflows will be written to manifest.pb on exit
-	defer stigmeragent.Complete()
+	defer stigmer.Complete()
 
 	// Create environment variable for API token
 	apiToken, err := environment.New(

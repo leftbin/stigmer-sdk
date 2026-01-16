@@ -6,9 +6,9 @@ import (
 
 // Ref is a minimal interface that represents a typed reference to a value.
 // This allows the agent package to work with context references without
-// importing the stigmeragent package (avoiding import cycles).
+// importing the stigmer package (avoiding import cycles).
 //
-// The stigmeragent.Ref types (StringRef, IntRef, BoolRef, ObjectRef) all
+// The stigmer.Ref types (StringRef, IntRef, BoolRef, ObjectRef) all
 // implement this interface.
 type Ref interface {
 	Expression() string

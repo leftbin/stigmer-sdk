@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/workflow"
 )
 
@@ -18,7 +18,7 @@ func (m *MockContext) RegisterWorkflow(wf *workflow.Workflow) {
 }
 
 func TestWorkflow_NewWithContext(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	
 	wf, err := workflow.NewWithContext(ctx,
 		workflow.WithNamespace("test"),
@@ -69,7 +69,7 @@ func TestWorkflow_NewWithoutContext(t *testing.T) {
 }
 
 func TestTaskBuilder_WithURIStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	apiURL := ctx.SetString("apiURL", "https://api.example.com")
 	
 	task := workflow.HttpCallTask("fetch",
@@ -107,7 +107,7 @@ func TestTaskBuilder_WithURIString(t *testing.T) {
 }
 
 func TestTaskBuilder_WithURIStringRefConcat(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	apiURL := ctx.SetString("apiURL", "https://api.example.com")
 	endpoint := apiURL.Concat("/users")
 	
@@ -131,7 +131,7 @@ func TestTaskBuilder_WithURIStringRefConcat(t *testing.T) {
 }
 
 func TestTaskBuilder_WithHeaderStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	token := ctx.SetSecret("token", "secret-token-123")
 	
 	task := workflow.HttpCallTask("fetch",
@@ -171,7 +171,7 @@ func TestTaskBuilder_WithHeaderString(t *testing.T) {
 }
 
 func TestTaskBuilder_WithTimeoutIntRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	timeout := ctx.SetInt("timeout", 60)
 	
 	task := workflow.HttpCallTask("fetch",
@@ -211,7 +211,7 @@ func TestTaskBuilder_WithTimeoutInt(t *testing.T) {
 }
 
 func TestTaskBuilder_SetVarStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	apiURL := ctx.SetString("apiURL", "https://api.example.com")
 	
 	task := workflow.SetTask("init",
@@ -247,7 +247,7 @@ func TestTaskBuilder_SetVarString(t *testing.T) {
 }
 
 func TestTaskBuilder_SetIntIntRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	retries := ctx.SetInt("retries", 3)
 	
 	task := workflow.SetTask("init",
@@ -283,7 +283,7 @@ func TestTaskBuilder_SetIntInt(t *testing.T) {
 }
 
 func TestTaskBuilder_SetStringStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	status := ctx.SetString("status", "pending")
 	
 	task := workflow.SetTask("init",
@@ -319,7 +319,7 @@ func TestTaskBuilder_SetStringString(t *testing.T) {
 }
 
 func TestTaskBuilder_SetBoolBoolRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	enabled := ctx.SetBool("enabled", true)
 	
 	task := workflow.SetTask("init",
@@ -355,7 +355,7 @@ func TestTaskBuilder_SetBoolBool(t *testing.T) {
 }
 
 func TestTaskBuilder_WithServiceStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	service := ctx.SetString("service", "UserService")
 	
 	task := workflow.GrpcCallTask("call",

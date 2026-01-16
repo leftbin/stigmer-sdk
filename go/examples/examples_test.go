@@ -186,9 +186,9 @@ func TestExample07_BasicWorkflow(t *testing.T) {
 			t.Error("Workflow should have tasks")
 		}
 
-		// Should have 3 tasks: initialize, fetchData, processResponse
-		if len(workflow.Spec.Tasks) != 3 {
-			t.Errorf("Expected 3 tasks, got %d", len(workflow.Spec.Tasks))
+		// Should have 2 tasks: fetchData, processResponse (Phase 5.1 Pulumi-aligned pattern)
+		if len(workflow.Spec.Tasks) != 2 {
+			t.Errorf("Expected 2 tasks, got %d", len(workflow.Spec.Tasks))
 		}
 	})
 }

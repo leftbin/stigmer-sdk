@@ -1,50 +1,161 @@
-// Package workflow provides types and builders for creating Stigmer workflows.
+// Package workflow provides types and builders for creating Stigmer workflows
+// with Pulumi-aligned patterns.
 //
-// Workflows are orchestration definitions that execute a series of tasks sequentially
-// or in parallel. They support various task types including HTTP calls, gRPC calls,
-// conditional logic, loops, error handling, and more.
+// Workflows are orchestration definitions that execute a series of tasks with
+// automatic dependency tracking, typed context variables, and clean builder APIs.
 //
 // # Creating Workflows
 //
-// Use New() with functional options to create a workflow:
+// Use NewWithContext() within a stigmer.Run() block:
 //
-//	workflow, err := workflow.New(
-//	    workflow.WithNamespace("my-org"),
-//	    workflow.WithName("data-pipeline"),
-//	    workflow.WithVersion("1.0.0"),
-//	    workflow.WithDescription("Process data from external API"),
+//	err := stigmer.Run(func(ctx *stigmer.Context) error {
+//	    // Context for shared configuration
+//	    orgName := ctx.SetString("org", "my-org")
+//	    
+//	    // Create workflow
+//	    wf, err := workflow.NewWithContext(ctx,
+//	        workflow.WithNamespace("data-processing"),
+//	        workflow.WithName("daily-sync"),
+//	        workflow.WithVersion("1.0.0"),
+//	        workflow.WithOrg(orgName),
+//	    )
+//	    if err != nil {
+//	        return err
+//	    }
+//	    
+//	    // Add tasks using workflow methods...
+//	    return nil
+//	})
+//
+// # Adding Tasks - Pulumi-Aligned Patterns
+//
+// ## HTTP Tasks (Clean Builders)
+//
+// Use convenience methods for common HTTP operations:
+//
+//	// HTTP GET - clean one-liner
+//	fetchTask := wf.HttpGet("fetchData", endpoint,
+//	    workflow.Header("Content-Type", "application/json"),
+//	    workflow.Header("Authorization", "Bearer ${API_TOKEN}"),
+//	    workflow.Timeout(30),
+//	)
+//	
+//	// HTTP POST
+//	createTask := wf.HttpPost("createItem", apiEndpoint,
+//	    workflow.Header("Content-Type", "application/json"),
+//	    workflow.Body(`{"name": "item1"}`),
+//	)
+//	
+//	// HTTP PUT
+//	updateTask := wf.HttpPut("updateItem", updateEndpoint,
+//	    workflow.Body(`{"status": "active"}`),
+//	)
+//	
+//	// HTTP DELETE
+//	deleteTask := wf.HttpDelete("deleteItem", deleteEndpoint)
+//
+// ## Setting Variables
+//
+// Use wf.SetVars() for clean variable assignment:
+//
+//	// Set multiple variables
+//	varsTask := wf.SetVars("initialize",
+//	    "apiURL", "https://api.example.com",
+//	    "retryCount", 3,
+//	    "debug", true,
 //	)
 //
-// # Adding Tasks
+// ## Direct Task Output References
 //
-// Tasks can be added using task builder functions:
+// Reference task outputs directly - dependencies are automatic:
 //
-//	// Set variables
-//	workflow.AddTask(workflow.SetTask("init",
-//	    workflow.SetVar("apiURL", "https://api.example.com"),
-//	    workflow.SetVar("count", "0"),
-//	))
+//	// Task 1: Fetch user data
+//	userTask := wf.HttpGet("getUser", userEndpoint)
+//	
+//	// Task 2: Use user output (dependency is automatic!)
+//	postsTask := wf.HttpGet("getPosts",
+//	    userTask.Field("id").Concat("/posts"),  // Direct reference!
+//	)
+//	
+//	// Task 3: Process results (depends on both tasks)
+//	summaryTask := wf.SetVars("createSummary",
+//	    "userName", userTask.Field("name"),     // From userTask
+//	    "postCount", postsTask.Field("total"),  // From postsTask
+//	)
+//	
+//	// Dependency chain: userTask → postsTask → summaryTask
+//	// All automatic through field references!
 //
-//	// HTTP call
-//	workflow.AddTask(workflow.HttpCallTask("fetchData",
-//	    workflow.WithHTTPGet(),  // Type-safe HTTP method
-//	    workflow.WithURI("${apiURL}/data"),
-//	    workflow.WithHeader("Authorization", "Bearer ${TOKEN}"),
-//	))
+// # Task Field References - The Core Pattern
 //
-//	// Conditional logic
-//	workflow.AddTask(workflow.SwitchTask("processResponse",
-//	    workflow.WithCase("${.status == 200}", "processSuccess"),
-//	    workflow.WithDefault("handleError"),
-//	))
+// Task field references make data flow explicit and enable automatic dependency tracking:
+//
+//	fetchTask := wf.HttpGet("fetch", endpoint)
+//	
+//	// ✅ Good: Direct reference with clear origin
+//	processTask := wf.SetVars("process",
+//	    "title", fetchTask.Field("title"),  // From fetchTask!
+//	    "body", fetchTask.Field("body"),    // From fetchTask!
+//	)
+//	
+//	// ❌ Bad: Magic string reference (OLD API)
+//	// workflow.FieldRef("title")  // Where does "title" come from???
+//
+// The fetchTask.Field("title") pattern:
+// 1. Creates a TaskFieldRef that knows its source
+// 2. Automatically registers dependency
+// 3. Generates correct expression in manifest
+// 4. Makes data flow obvious to readers
+//
+// # Context for Configuration Only
+//
+// Following Pulumi's pulumi.Config pattern, context is for configuration ONLY:
+//
+//	// ✅ Good: Configuration
+//	apiBase := ctx.SetString("apiBase", "https://api.example.com")
+//	orgName := ctx.SetString("org", "my-org")
+//	timeout := ctx.SetInt("timeout", 30)
+//	
+//	// Use in workflow metadata
+//	wf, _ := workflow.NewWithContext(ctx,
+//	    workflow.WithOrg(orgName),
+//	)
+//	
+//	// Use to build task inputs
+//	endpoint := apiBase.Concat("/users/123")
+//	fetchTask := wf.HttpGet("fetch", endpoint)
+//	
+//	// ❌ Bad: Don't use context for workflow internal data flow
+//	// Internal task-to-task data flow uses TaskFieldRef, not context!
+//
+// # Implicit Dependencies
+//
+// Dependencies are inferred from field references (like Pulumi's bucket.ID() pattern):
+//
+//	// Create tasks that reference each other
+//	step1 := wf.HttpGet("step1", endpoint1)
+//	step2 := wf.HttpGet("step2", 
+//	    step1.Field("nextUrl"),  // References step1
+//	)
+//	step3 := wf.SetVars("step3",
+//	    "data1", step1.Field("result"),  // References step1
+//	    "data2", step2.Field("result"),  // References step2
+//	)
+//	
+//	// Dependency graph built automatically:
+//	// step1 → step2
+//	// step1 → step3
+//	// step2 → step3
+//	
+//	// No manual ThenRef() or DependsOn() needed!
 //
 // # Task Types
 //
 // The workflow package supports all Zigflow DSL task types:
 //
-//   - SET: Assign variables in workflow state
-//   - HTTP_CALL: Make HTTP requests (GET, POST, PUT, DELETE, PATCH)
-//   - GRPC_CALL: Make gRPC calls
+//   - SET: Assign variables (use wf.SetVars())
+//   - HTTP_CALL: HTTP requests (use wf.HttpGet/Post/Put/Delete())
+//   - GRPC_CALL: gRPC calls
 //   - SWITCH: Conditional branching
 //   - FOR: Iterate over collections
 //   - FORK: Parallel task execution
@@ -60,96 +171,161 @@
 // Workflows can declare required environment variables:
 //
 //	import "github.com/leftbin/stigmer-sdk/go/environment"
-//
+//	
 //	apiToken, _ := environment.New(
-//	    environment.WithName("TOKEN"),
+//	    environment.WithName("API_TOKEN"),
 //	    environment.WithSecret(true),
 //	    environment.WithDescription("API authentication token"),
 //	)
-//	workflow.AddEnvironmentVariable(apiToken)
-//
-// # Flow Control
-//
-// Control task execution flow using export and flow directives:
-//
-//	task := workflow.HttpCallTask("fetchData",
-//	    workflow.WithHTTPGet(),  // Type-safe HTTP method
-//	    workflow.WithURI("${apiURL}/data"),
+//	
+//	wf, _ := workflow.NewWithContext(ctx,
+//	    workflow.WithName("my-workflow"),
+//	    workflow.WithEnvironmentVariable(apiToken),
 //	)
-//	task.Export("${.}") // Export entire response
-//	task.Then("processData") // Jump to task named "processData"
 //
-// # Registration and Synthesis
+// # Type Safety
 //
-// Workflows are automatically registered in the global registry when created.
-// When the program exits (with defer synth.AutoSynth()), workflows are converted
-// to manifest protos and written to disk.
+// Typed references provide compile-time safety:
 //
-//	import "github.com/leftbin/stigmer-sdk/go/synthesis"
+//	// Context variables are typed
+//	apiBase := ctx.SetString("apiBase", "https://api.example.com")
+//	timeout := ctx.SetInt("timeout", 30)
+//	
+//	// ✅ Type-safe operations
+//	endpoint := apiBase.Concat("/users")  // StringRef.Concat()
+//	
+//	// ✅ Task references are checked
+//	fetchTask := wf.HttpGet("fetch", endpoint)
+//	processTask := wf.SetVars("process",
+//	    "data", fetchTask.Field("result"),  // fetchTask is a *Task
+//	)
+//	
+//	// ❌ Compile error - not a task
+//	wrongVar := "some-string"
+//	wf.SetVars("process",
+//	    "data", wrongVar.Field("result"),  // Type error!
+//	)
 //
+// # Complete Example
+//
+// Pulumi-aligned workflow with all features:
+//
+//	package main
+//	
+//	import (
+//	    "log"
+//	    "github.com/leftbin/stigmer-sdk/go/stigmer"
+//	    "github.com/leftbin/stigmer-sdk/go/workflow"
+//	    "github.com/leftbin/stigmer-sdk/go/environment"
+//	)
+//	
 //	func main() {
-//	    defer synthesis.AutoSynth()
-//
-//	    workflow, _ := workflow.New(...)
-//	    // ... add tasks
+//	    err := stigmer.Run(func(ctx *stigmer.Context) error {
+//	        // Context: shared configuration
+//	        apiBase := ctx.SetString("apiBase", "https://api.example.com")
+//	        orgName := ctx.SetString("org", "my-org")
+//	        
+//	        // Environment variable
+//	        apiToken, _ := environment.New(
+//	            environment.WithName("API_TOKEN"),
+//	            environment.WithSecret(true),
+//	        )
+//	        
+//	        // Create workflow
+//	        wf, _ := workflow.NewWithContext(ctx,
+//	            workflow.WithNamespace("data-processing"),
+//	            workflow.WithName("user-sync"),
+//	            workflow.WithVersion("1.0.0"),
+//	            workflow.WithOrg(orgName),
+//	            workflow.WithEnvironmentVariable(apiToken),
+//	        )
+//	        
+//	        // Task 1: Fetch user data
+//	        userEndpoint := apiBase.Concat("/users/123")
+//	        userTask := wf.HttpGet("getUser", userEndpoint,
+//	            workflow.Header("Authorization", "Bearer ${API_TOKEN}"),
+//	        )
+//	        
+//	        // Task 2: Fetch user's posts (depends on userTask)
+//	        postsTask := wf.HttpGet("getPosts",
+//	            apiBase.Concat("/posts?userId=").Concat(userTask.Field("id")),
+//	        )
+//	        
+//	        // Task 3: Create summary (depends on both tasks)
+//	        summaryTask := wf.SetVars("createSummary",
+//	            "userName", userTask.Field("name"),
+//	            "userEmail", userTask.Field("email"),
+//	            "postCount", postsTask.Field("total"),
+//	            "firstPost", postsTask.Field("items[0].title"),
+//	        )
+//	        
+//	        log.Printf("Created workflow with %d tasks", len(wf.Tasks))
+//	        // Dependencies: userTask → postsTask → summaryTask (automatic!)
+//	        return nil
+//	    })
+//	    
+//	    if err != nil {
+//	        log.Fatal(err)
+//	    }
 //	}
+//
+// # Migration from Old API
+//
+// If you're migrating from the old API:
+//
+//	// OLD ❌
+//	task := workflow.HttpCallTask("fetch",
+//	    workflow.WithHTTPGet(),
+//	    workflow.WithURI(endpoint),
+//	).ExportAll()
+//	
+//	processTask := workflow.SetTask("process",
+//	    workflow.SetVar("title", workflow.FieldRef("title")),  // Magic string
+//	)
+//	task.ThenRef(processTask)  // Manual dependency
+//	
+//	// NEW ✅
+//	fetchTask := wf.HttpGet("fetch", endpoint)
+//	
+//	processTask := wf.SetVars("process",
+//	    "title", fetchTask.Field("title"),  // Direct reference
+//	)
+//	// Dependency is automatic!
+//
+// See docs/guides/typed-context-migration.md for a complete migration guide.
 //
 // # Validation
 //
 // Workflows are validated when created and when tasks are added:
 //
-//   - Document: namespace, name, and version are required (semver)
+//   - Metadata: namespace, name, and version are required (version must be semver)
 //   - Tasks: must have at least one task
 //   - Task names: must be unique within workflow
 //   - Task configs: validated based on task type
+//   - Dependencies: validated to prevent cycles
 //
-// # Example
+// # Synthesis
 //
-// Complete workflow example:
+// Workflows are automatically synthesized when stigmer.Run() completes:
 //
-//	package main
+// 1. Context variables resolved to expressions
+// 2. Task field references resolved to $context.taskName.field expressions
+// 3. Dependency graph built from references
+// 4. Tasks topologically sorted
+// 5. Proto manifest generated
+// 6. Manifest written to workflow-manifest.pb
 //
-//	import (
-//	    "log"
-//	    "github.com/leftbin/stigmer-sdk/go/workflow"
-//	    "github.com/leftbin/stigmer-sdk/go/environment"
-//	    "github.com/leftbin/stigmer-sdk/go/synthesis"
-//	)
+// # Documentation
 //
-//	func main() {
-//	    defer synthesis.AutoSynth()
+// For comprehensive documentation:
 //
-//	    // Create environment variable
-//	    apiToken, _ := environment.New(
-//	        environment.WithName("API_TOKEN"),
-//	        environment.WithSecret(true),
-//	    )
+//   - Architecture: docs/architecture/pulumi-aligned-patterns.md
+//   - Migration Guide: docs/guides/typed-context-migration.md
+//   - Examples: examples/07_basic_workflow.go
+//   - Full Docs: docs/README.md
 //
-//	    // Create workflow
-//	    wf, err := workflow.New(
-//	        workflow.WithNamespace("data-processing"),
-//	        workflow.WithName("daily-sync"),
-//	        workflow.WithVersion("1.0.0"),
-//	        workflow.WithDescription("Sync data from external API daily"),
-//	        workflow.WithEnvironmentVariable(apiToken),
-//	    )
-//	    if err != nil {
-//	        log.Fatal(err)
-//	    }
+// # Version
 //
-//	    // Add tasks
-//	    wf.AddTask(workflow.SetTask("init",
-//	        workflow.SetVar("apiURL", "https://api.example.com"),
-//	    ))
-//
-//	    wf.AddTask(workflow.HttpCallTask("fetchData",
-//	        workflow.WithHTTPGet(),  // Type-safe HTTP method
-//	        workflow.WithURI("${apiURL}/data"),
-//	        workflow.WithHeader("Authorization", "Bearer ${API_TOKEN}"),
-//	    )).Export("${.}").Then("processData")
-//
-//	    wf.AddTask(workflow.SetTask("processData",
-//	        workflow.SetVar("processed", "${.count}"),
-//	    ))
-//	}
+// This is the NEW Pulumi-aligned API (2026-01-16+).
+// For the OLD API, see examples/07_basic_workflow_legacy.go for comparison.
 package workflow

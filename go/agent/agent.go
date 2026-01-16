@@ -12,9 +12,9 @@ import (
 
 // Context is a minimal interface that represents a stigmer context.
 // This allows the agent package to work with contexts without importing
-// the stigmeragent package (avoiding import cycles).
+// the stigmer package (avoiding import cycles).
 //
-// The stigmeragent.Context type implements this interface.
+// The stigmer.Context type implements this interface.
 type Context interface {
 	RegisterAgent(*Agent)
 }
@@ -34,7 +34,7 @@ type Context interface {
 //
 // Or use with typed context (recommended):
 //
-//	stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+//	stigmer.Run(func(ctx *stigmer.Context) error {
 //	    ag, err := agent.NewWithContext(ctx,
 //	        agent.WithName("code-reviewer"),
 //	        agent.WithInstructions("Review code and suggest improvements"),
@@ -132,7 +132,7 @@ func New(opts ...Option) (*Agent, error) {
 //
 // Example:
 //
-//	stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+//	stigmer.Run(func(ctx *stigmer.Context) error {
 //	    ag, err := agent.NewWithContext(ctx,
 //	        agent.WithName("code-reviewer"),
 //	        agent.WithInstructions("Review code and suggest improvements"),

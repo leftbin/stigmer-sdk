@@ -1,4 +1,4 @@
-package stigmeragent
+package stigmer
 
 import (
 	"testing"

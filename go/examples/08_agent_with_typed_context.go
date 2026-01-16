@@ -6,7 +6,7 @@ package main
 import (
 	"log"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/agent"
 	"github.com/leftbin/stigmer-sdk/go/environment"
 	"github.com/leftbin/stigmer-sdk/go/mcpserver"
@@ -29,7 +29,7 @@ import (
 // - Automatic synthesis on completion
 func main() {
 	// Use stigmer.Run() for automatic context and synthesis management
-	err := stigmeragent.Run(func(ctx *stigmeragent.Context) error {
+	err := stigmer.Run(func(ctx *stigmer.Context) error {
 		// Create typed context variables (compile-time checked!)
 		agentName := ctx.SetString("agentName", "code-reviewer")
 		baseIconURL := ctx.SetString("baseIconURL", "https://example.com")

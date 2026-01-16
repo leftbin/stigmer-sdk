@@ -3,12 +3,12 @@ package agent_test
 import (
 	"testing"
 
-	stigmeragent "github.com/leftbin/stigmer-sdk/go"
+	"github.com/leftbin/stigmer-sdk/go/stigmer"
 	"github.com/leftbin/stigmer-sdk/go/agent"
 )
 
 func TestAgent_NewWithContext(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 
 	ag, err := agent.NewWithContext(ctx,
 		agent.WithName("code-reviewer"),
@@ -57,7 +57,7 @@ func TestAgent_NewWithoutContext(t *testing.T) {
 }
 
 func TestAgentBuilder_WithNameStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	agentName := ctx.SetString("agentName", "code-reviewer")
 
 	ag, err := agent.NewWithContext(ctx,
@@ -94,7 +94,7 @@ func TestAgentBuilder_WithNameString(t *testing.T) {
 }
 
 func TestAgentBuilder_WithInstructionsStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	instructions := ctx.SetString("instructions", "Review code and suggest improvements based on best practices")
 
 	ag, err := agent.NewWithContext(ctx,
@@ -130,7 +130,7 @@ func TestAgentBuilder_WithInstructionsString(t *testing.T) {
 }
 
 func TestAgentBuilder_WithDescriptionStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	description := ctx.SetString("description", "AI-powered code reviewer")
 
 	ag, err := agent.NewWithContext(ctx,
@@ -168,7 +168,7 @@ func TestAgentBuilder_WithDescriptionString(t *testing.T) {
 }
 
 func TestAgentBuilder_WithIconURLStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	iconURL := ctx.SetString("iconURL", "https://example.com/icon.png")
 
 	ag, err := agent.NewWithContext(ctx,
@@ -206,7 +206,7 @@ func TestAgentBuilder_WithIconURLString(t *testing.T) {
 }
 
 func TestAgentBuilder_WithOrgStringRef(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	org := ctx.SetString("org", "my-organization")
 
 	ag, err := agent.NewWithContext(ctx,
@@ -244,7 +244,7 @@ func TestAgentBuilder_WithOrgString(t *testing.T) {
 }
 
 func TestAgentBuilder_MixedTypedAndLegacy(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	agentName := ctx.SetString("agentName", "code-reviewer")
 	description := ctx.SetString("description", "AI reviewer")
 
@@ -275,7 +275,7 @@ func TestAgentBuilder_MixedTypedAndLegacy(t *testing.T) {
 }
 
 func TestAgentBuilder_StringRefConcat(t *testing.T) {
-	ctx := stigmeragent.NewContext()
+	ctx := stigmer.NewContext()
 	baseURL := ctx.SetString("baseURL", "https://example.com")
 	iconPath := baseURL.Concat("/icons/reviewer.png")
 
