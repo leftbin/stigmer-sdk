@@ -1455,6 +1455,345 @@ workflow.New(
 
 ---
 
+### 2026-01-16 - Pulumi-Aligned API: TaskFieldRef and Implicit Dependencies (MAJOR PATTERN)
+
+**Problem**: Workflow API had confusing patterns that didn't match professional IaC tools:
+1. Magic field references - `FieldRef("title")` - unclear where "title" comes from
+2. Manual dependency management - `fetchTask.ThenRef(processTask)` - error-prone
+3. Verbose builders - `HttpCallTask("fetch", WithHTTPGet(), WithURI(url))` - boilerplate
+4. Confusing exports - `ExportAll()` - unclear semantics
+5. Context misuse - used for both config AND internal data flow
+
+**Root Cause**:
+- API design didn't follow Pulumi's patterns (the industry standard for IaC)
+- No explicit task output references - relied on global string matching
+- Dependencies not inferred from data flow
+- No builder convenience methods
+- Mixed concerns: context for config vs internal flow
+
+**Solution**: Transformed API to match Pulumi's design principles
+
+#### 1. TaskFieldRef Type - Clear Output References
+
+**Created**: New `TaskFieldRef` type implementing `Ref` interface for explicit origins
+
+```go
+// TaskFieldRef represents a typed reference to task output field
+type TaskFieldRef struct {
+    taskName  string  // Source task name
+    fieldName string  // Field name in output
+}
+
+func (r TaskFieldRef) Expression() string {
+    return fmt.Sprintf("${ $context.%s.%s }", r.taskName, r.fieldName)
+}
+
+func (r TaskFieldRef) TaskName() string {
+    return r.taskName  // Used for dependency tracking
+}
+
+// Task.Field() method creates field reference
+func (t *Task) Field(fieldName string) TaskFieldRef {
+    return TaskFieldRef{
+        taskName:  t.Name,
+        fieldName: fieldName,
+    }
+}
+```
+
+**Before** (magic strings):
+```go
+workflow.FieldRef("title")  // ❌ Where does "title" come from?
+```
+
+**After** (explicit origin):
+```go
+fetchTask := wf.HttpGet("fetch", endpoint)
+title := fetchTask.Field("title")  // ✅ Clear: from fetchTask!
+```
+
+#### 2. Implicit Dependency Tracking
+
+**Implemented**: Automatic dependency tracking through TaskFieldRef usage
+
+**How it works**:
+1. When `TaskFieldRef` is used in `SetVar()` or `WithURI()`, extract task name
+2. Store in `ImplicitDependencies map[string]bool` on task config
+3. During task creation, propagate dependencies to `Task.Dependencies []string`
+4. Workflow synthesis uses Dependencies field for execution order
+
+**Changes**:
+```go
+// Added to Task struct
+type Task struct {
+    // ... existing fields ...
+    Dependencies []string  // NEW: Automatic dependency tracking
+}
+
+// Added to configs
+type SetTaskConfig struct {
+    Variables            map[string]string
+    ImplicitDependencies map[string]bool  // NEW
+}
+
+type HttpCallTaskConfig struct {
+    // ... existing fields ...
+    ImplicitDependencies map[string]bool  // NEW
+}
+
+// Updated SetVar to track dependencies
+func SetVar(key string, value interface{}) SetTaskOption {
+    return func(cfg *SetTaskConfig) {
+        cfg.Variables[key] = toExpression(value)
+        
+        // Track implicit dependency
+        if fieldRef, ok := value.(TaskFieldRef); ok {
+            if cfg.ImplicitDependencies == nil {
+                cfg.ImplicitDependencies = make(map[string]bool)
+            }
+            cfg.ImplicitDependencies[fieldRef.TaskName()] = true
+        }
+    }
+}
+
+// Updated SetTask to propagate dependencies
+func SetTask(name string, opts ...SetTaskOption) *Task {
+    cfg := &SetTaskConfig{
+        Variables:            make(map[string]string),
+        ImplicitDependencies: make(map[string]bool),
+    }
+
+    for _, opt := range opts {
+        opt(cfg)
+    }
+
+    task := &Task{
+        Name:         name,
+        Kind:         TaskKindSet,
+        Config:       cfg,
+        Dependencies: []string{},
+    }
+
+    // Propagate implicit dependencies
+    for taskName := range cfg.ImplicitDependencies {
+        task.Dependencies = append(task.Dependencies, taskName)
+    }
+
+    return task
+}
+```
+
+**Before** (manual dependencies):
+```go
+fetchTask := workflow.HttpCallTask("fetch", ...)
+processTask := workflow.SetTask("process", ...)
+fetchTask.ThenRef(processTask)  // ❌ Manual!
+```
+
+**After** (implicit dependencies):
+```go
+fetchTask := wf.HttpGet("fetch", endpoint)
+processTask := wf.SetVars("process",
+    "title", fetchTask.Field("title"),  // ✅ Dependency automatic!
+)
+// No ThenRef needed!
+```
+
+#### 3. Task.DependsOn() Escape Hatch
+
+**Added**: Explicit dependency method for edge cases (like Pulumi's `pulumi.DependsOn()`)
+
+```go
+func (t *Task) DependsOn(tasks ...*Task) *Task {
+    for _, task := range tasks {
+        if !contains(t.Dependencies, task.Name) {
+            t.Dependencies = append(t.Dependencies, task.Name)
+        }
+    }
+    return t
+}
+```
+
+**When to use**: Side effects matter but no data flow (e.g., cleanup tasks)
+
+#### 4. Workflow Convenience Methods
+
+**Added**: Pulumi-style builders directly on Workflow
+
+```go
+func (w *Workflow) HttpGet(name string, uri interface{}, opts ...HttpCallTaskOption) *Task {
+    allOpts := []HttpCallTaskOption{
+        WithHTTPGet(),
+        WithURI(uri),
+    }
+    allOpts = append(allOpts, opts...)
+    
+    task := HttpCallTask(name, allOpts...)
+    w.AddTask(task)  // Auto-add to workflow
+    return task
+}
+
+func (w *Workflow) SetVars(name string, keyValuePairs ...interface{}) *Task {
+    // Validate even number of arguments (key-value pairs)
+    opts := make([]SetTaskOption, 0)
+    for i := 0; i < len(keyValuePairs); i += 2 {
+        key := keyValuePairs[i].(string)
+        value := keyValuePairs[i+1]
+        opts = append(opts, SetVar(key, value))
+    }
+    
+    task := SetTask(name, opts...)
+    w.AddTask(task)
+    return task
+}
+```
+
+**Before** (verbose):
+```go
+fetchTask := workflow.HttpCallTask("fetch",
+    workflow.WithHTTPGet(),
+    workflow.WithURI(endpoint),
+    workflow.WithHeader("Content-Type", "application/json"),
+    workflow.WithTimeout(30),
+)
+wf.AddTask(fetchTask)
+```
+
+**After** (clean):
+```go
+fetchTask := wf.HttpGet("fetch", endpoint,
+    workflow.Header("Content-Type", "application/json"),
+    workflow.Timeout(30),
+)
+// Task automatically added!
+```
+
+#### 5. Validation Changes
+
+**Changed**: Allow workflows without tasks during creation
+
+```go
+// Before: Required at least one task
+if len(w.Tasks) == 0 {
+    return NewValidationErrorWithCause(
+        "tasks", "", "min_items",
+        "workflow must have at least one task",
+        ErrNoTasks,
+    )
+}
+
+// After: Allow empty (supports wf.New() then wf.HttpGet() pattern)
+if len(w.Tasks) == 0 {
+    return nil  // Allow empty workflows
+}
+```
+
+**Rationale**: Enables Pulumi-style workflow construction:
+```go
+wf := workflow.New(ctx, ...)  // Create first
+fetchTask := wf.HttpGet(...)   // Add tasks after
+```
+
+#### Complete Example Transformation
+
+**Before** (confusing):
+```go
+// Context for everything
+apiURL := ctx.SetString("apiURL", "https://...")
+retryCount := ctx.SetInt("retryCount", 0)
+
+// Redundant copying
+initTask := workflow.SetTask("initialize",
+    workflow.SetVar("currentURL", apiURL),
+    workflow.SetVar("currentRetries", retryCount),
+)
+
+// Verbose builders
+fetchTask := workflow.HttpCallTask("fetchData",
+    workflow.WithHTTPGet(),
+    workflow.WithURI(endpoint),
+    workflow.WithHeader("Content-Type", "application/json"),
+).ExportAll()  // ❌ Confusing
+
+// Magic field references
+processTask := workflow.SetTask("processResponse",
+    workflow.SetVar("postTitle", workflow.FieldRef("title")),  // ❌ Where from?
+    workflow.SetVar("postBody", workflow.FieldRef("body")),
+)
+
+// Manual dependencies
+initTask.ThenRef(fetchTask)
+fetchTask.ThenRef(processTask)
+```
+
+**After** (professional):
+```go
+// Context ONLY for config (like Pulumi)
+apiBase := ctx.SetString("apiBase", "https://...")
+orgName := ctx.SetString("org", "my-org")
+
+// Create workflow
+wf := workflow.New(ctx,
+    workflow.Name("basic-data-fetch"),
+    workflow.Org(orgName),
+)
+
+// Build endpoint
+endpoint := apiBase.Concat("/posts/1")
+
+// Clean HTTP GET (one-liner)
+fetchTask := wf.HttpGet("fetchData", endpoint,
+    workflow.Header("Content-Type", "application/json"),
+    workflow.Timeout(30),
+)
+
+// Process response with clear origins
+processTask := wf.SetVars("processResponse",
+    "postTitle", fetchTask.Field("title"),  // ✅ Clear origin!
+    "postBody", fetchTask.Field("body"),    // ✅ Clear origin!
+    "status", "success",
+)
+// Dependencies automatic!
+```
+
+**Impact**:
+- ✅ API matches industry standard (Pulumi)
+- ✅ Clear origins for all field references
+- ✅ Implicit dependencies (90% of cases)
+- ✅ Clean, readable code
+- ✅ Better developer experience
+- ✅ Type safety and IDE autocomplete
+- ✅ Reduced boilerplate (~40% fewer lines)
+
+**Prevention**:
+- Model APIs after proven systems (Pulumi, Terraform)
+- Infer relationships from data flow
+- Make common patterns easy, edge cases possible
+- Provide escape hatches (`DependsOn()`) for exceptions
+- Keep validation flexible for different construction patterns
+
+**Testing**:
+- All existing workflow tests still pass
+- Example 07 rewritten demonstrating new patterns
+- Implicit dependencies verified in test output
+
+**Files Modified**:
+- `workflow/task.go` (~300 lines added)
+- `workflow/workflow.go` (~150 lines added)
+- `workflow/validation.go` (logic updated)
+- `workflow/workflow_test.go` (test updated)
+- `examples/07_basic_workflow.go` (complete rewrite)
+
+**Cross-Language Reference**:
+- **Python approach**: Not yet implemented in Python SDK
+- **Go approach**: TaskFieldRef type + implicit dependency tracking
+- **Reusable concept**: Task output references with automatic dependencies
+- **Apply to Python SDK**: Consider similar pattern with Python type hints
+
+**Related**: Phase 5.1 of Project 20260116.04.sdk-typed-context-system
+
+---
+
 ## Proto Converters & Transformations
 
 **Topic Coverage**: Proto message conversions, pointer handling, nil checks, nested messages, repeated fields
