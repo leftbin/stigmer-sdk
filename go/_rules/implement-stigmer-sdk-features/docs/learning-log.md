@@ -158,6 +158,206 @@ During implementation, there was confusion about when to use:
 
 ---
 
+## 2026-01-17: Auto-Export on Field Reference (Pulumi-Style Implicit Dependencies)
+
+### Context
+
+Implemented automatic export when task output fields are referenced via `.Field()` method. This achieves Pulumi-style implicit dependencies where accessing an output automatically makes it available, eliminating manual `.ExportAll()` calls and preventing "nil reference" runtime errors.
+
+### Pattern 1: In-Place Modification for Auto-Export
+
+**Problem**: Users had to manually call `task.ExportAll()` before using `task.Field()` references, creating boilerplate and potential runtime errors if forgotten.
+
+**Solution**: Modify task export in-place when `.Field()` is called:
+
+```go
+// In workflow/task.go
+func (t *Task) Field(fieldName string) TaskFieldRef {
+    // Auto-export: When a task's field is referenced, automatically export the task
+    if t.ExportAs == "" {
+        t.ExportAs = "${.}"
+    }
+    
+    return TaskFieldRef{
+        taskName:  t.Name,
+        fieldName: fieldName,
+    }
+}
+```
+
+**Why This Works**:
+- Task is a pointer type (`*Task`) - modifications affect the original
+- Export is set at point of use (discoverable)
+- No separate tracking mechanism needed
+- Simpler than visitor pattern or post-processing
+
+**When to Use**: Anytime you need to trigger side effects based on method calls (accessing outputs, referencing resources)
+
+### Pattern 2: Idempotency Check for Safety
+
+**Problem**: Multiple `.Field()` calls on the same task, or calling `.Field()` after `.ExportField()`, could overwrite custom exports.
+
+**Solution**: Check before setting export:
+
+```go
+if t.ExportAs == "" {
+    t.ExportAs = "${.}"
+}
+```
+
+**Why This Works**:
+- Empty string check is simple and fast
+- First `.Field()` call sets export
+- Subsequent calls are no-ops
+- Custom exports (`.ExportField("specific")`) are preserved
+
+**Benefits**:
+- Multiple `.Field()` calls are safe
+- User can still override export if needed
+- Backward compatible with existing code
+
+**When to Use**: Anytime you're doing automatic behavior that users might customize
+
+### Pattern 3: Export/Reference Alignment Understanding
+
+**Problem**: Understanding how export transforms task output and how field references access it.
+
+**Solution**: Know the transformation:
+
+1. **Export `{ as: '${.}' }`**:
+   - Takes current task output (`.`)
+   - Makes it available at `$context.<taskName>`
+   - For task `fetchData`: output → `$context.fetchData`
+
+2. **Field Reference `fetchTask.Field("title")`**:
+   - Generates: `${ $context.fetchData.title }`
+   - Reads from: `$context.fetchData.title`
+
+3. **Alignment**:
+   ```
+   Export:    $context.fetchData        ← Task output stored here
+                      ↓
+   Reference: $context.fetchData.title  ← Field reads from here
+   ```
+
+**Why This Matters**:
+- Export and reference must use the same base path
+- `${.}` exports to task name automatically (Zigflow behavior)
+- Field references assume this structure
+- Any mismatch causes runtime "nil reference" errors
+
+**Gotcha**: If you use custom export like `ExportField("specificField")`, it changes the path to `$context.specificField` (not `$context.taskName.specificField`). Field references won't work with this pattern!
+
+**When to Use**: Designing any auto-export or reference system
+
+### Pattern 4: Testing Examples with examples_test.go
+
+**Problem**: Need to verify examples work end-to-end and synthesize correctly.
+
+**Solution**: Follow existing `examples_test.go` pattern:
+
+```go
+func TestExample14_AutoExportVerification(t *testing.T) {
+    runExampleTest(t, "14_auto_export_verification.go", func(t *testing.T, outputDir string) {
+        // 1. Read manifest
+        manifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+        assertFileExists(t, manifestPath)
+        
+        var manifest workflowv1.WorkflowManifest
+        readProtoManifest(t, manifestPath, &manifest)
+        
+        // 2. Verify structure
+        workflow := manifest.Workflows[0]
+        
+        // 3. Find specific task
+        var fetchDataTask *workflowv1.WorkflowTask
+        for _, task := range workflow.Spec.Tasks {
+            if task.Name == "fetchData" {
+                fetchDataTask = task
+                break
+            }
+        }
+        
+        // 4. Verify export is set
+        if fetchDataTask.Export == nil {
+            t.Error("fetchData should have auto-export")
+        } else if fetchDataTask.Export.As != "${.}" {
+            t.Errorf("export.as = %v, want ${.}", fetchDataTask.Export.As)
+        }
+    })
+}
+```
+
+**Why This Works**:
+- `runExampleTest()` helper handles execution with `STIGMER_OUT_DIR`
+- Tests actual synthesis (not mocked)
+- Verifies protobuf structure
+- Follows established pattern (consistent with other 14 tests)
+
+**Pattern Elements**:
+- Test function: `TestExample##_Description`
+- Use `runExampleTest()` helper
+- Verify manifest file created
+- Unmarshal and validate proto
+- Check specific fields and values
+
+**When to Use**: Every new example should have a test in `examples_test.go`
+
+### UX Decision: Auto-Export vs Manual Export
+
+**Design Choice**: Auto-export when `.Field()` is called instead of requiring manual `.ExportAll()`
+
+**Rationale**:
+1. **Pulumi Alignment**: In Pulumi, accessing `resource.output` creates implicit dependency - no manual export needed
+2. **Pit of Success**: Doing the right thing is automatic, not optional
+3. **Error Prevention**: Forgetting `.ExportAll()` caused runtime "nil reference" errors
+4. **Code Clarity**: One fewer line, clearer intent
+
+**Alternative Considered**: Require manual `.ExportAll()` and provide clear error messages
+
+**Why Auto-Export Won**:
+- Eliminates entire class of errors
+- Matches proven Pulumi UX pattern
+- More discoverable (just use `.Field()` naturally)
+- Backward compatible (manual `.ExportAll()` still works)
+
+**Trade-off Accepted**: Tasks auto-export even if only one field is used (slight overhead, but negligible)
+
+### Testing Strategy: Three Levels
+
+**Problem**: How to verify auto-export works correctly at all levels.
+
+**Solution**: Test at three levels:
+
+1. **Unit Tests** (`workflow/task_test.go`):
+   - Test behavior in isolation
+   - Edge cases: idempotency, custom exports
+   - Fast, focused tests
+   - **Issue**: Other existing tests had compilation errors (unrelated)
+
+2. **Integration Tests** (Example files as programs):
+   - Real workflow synthesis
+   - Export/reference alignment
+   - Run with `go run`
+   - Living documentation
+   - **Result**: Created Examples 14 & 15, both work perfectly
+
+3. **Test Suite** (`examples/examples_test.go`):
+   - End-to-end verification
+   - Manifest structure validation
+   - Proto field verification
+   - **Result**: All 12 tests passing
+
+**Why Three Levels**:
+- Unit tests catch logic errors
+- Integration tests catch synthesis errors
+- Test suite catches manifest structure errors
+- Different levels find different bugs
+
+**When to Use**: Any significant SDK feature needs all three levels
+
+---
+
 ## Future Patterns to Document
 
 - Environment spec implementation (ctx.Env)
