@@ -152,4 +152,3 @@ func TestExportField_NotOverriddenByField(t *testing.T) {
 	}
 }
 
-}
