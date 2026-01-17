@@ -219,14 +219,14 @@ func TestExample07_BasicWorkflow(t *testing.T) {
 			t.Fatal("fetchData task not found")
 		}
 
-		// COMPILE-TIME VS RUNTIME VARIABLE RESOLUTION:
-		// The example uses apiBase.Concat() which generates a RUNTIME JQ expression.
-		// This is intentional - .Concat() creates "${ $context.apiBase + "/posts/1" }"
+		// SMART RESOLUTION TEST:
+		// The example uses apiBase.Concat("/posts/1") where both parts are known at synthesis time.
+		// The SDK should resolve this IMMEDIATELY to the final URL, not create a runtime expression.
 		//
-		// Compile-time resolution applies to SIMPLE PLACEHOLDERS like "${apiBase}"
-		// Runtime resolution applies to JQ EXPRESSIONS like "${ $context.apiBase + ... }"
+		// Expected: "https://jsonplaceholder.typicode.com/posts/1" (fully resolved)
+		// NOT: "${ $context.apiBase + "/posts/1" }" (runtime expression)
 		//
-		// Both are valid! The key test is that NO __stigmer_init_context task exists.
+		// This is the core of compile-time resolution - resolve everything we can at synthesis time.
 		if fetchDataTask.TaskConfig == nil {
 			t.Fatal("fetchData task config is nil")
 		}
@@ -247,12 +247,13 @@ func TestExample07_BasicWorkflow(t *testing.T) {
 		}
 
 		uriValue := uri.GetStringValue()
-		t.Logf("URI expression: %s", uriValue)
+		t.Logf("URI value: %s", uriValue)
 
-		// The URI is a runtime expression (because .Concat() was used)
-		// This is correct - runtime expressions are for computed values
-		if uriValue == "" {
-			t.Error("URI expression should not be empty")
+		// The URI should be FULLY RESOLVED at synthesis time
+		// because .Concat() was called on known values
+		expectedURI := "https://jsonplaceholder.typicode.com/posts/1"
+		if uriValue != expectedURI {
+			t.Errorf("URI = %v, want %v (compile-time resolution should resolve .Concat() on known values)", uriValue, expectedURI)
 		}
 
 		// AUTO-EXPORT FUNCTIONALITY TEST:
@@ -304,7 +305,10 @@ func TestExample07_BasicWorkflow(t *testing.T) {
 			t.Errorf("postTitle reference = %v, want ${ $context.fetchData.title }", postTitleRef)
 		}
 
-		t.Log("✅ Compile-time variable resolution verified: NO __stigmer_init_context task")
+		t.Log("✅ Compile-time variable resolution verified:")
+		t.Log("   - NO __stigmer_init_context task generated")
+		t.Log("   - .Concat() on known values resolved immediately")
+		t.Log("   - URL fully resolved: https://jsonplaceholder.typicode.com/posts/1")
 		t.Log("✅ Auto-export functionality verified: fetchData exports when .Field() is used")
 	})
 }
@@ -561,11 +565,10 @@ func TestExample13_WorkflowAndAgentSharedContext(t *testing.T) {
 }
 
 // TestCompileTimeVariableResolution tests that context variables are resolved at compile-time
-// This is an integration test, not tied to a specific example file.
-// It creates a workflow programmatically and verifies:
+// This integration test verifies:
 // 1. NO __stigmer_init_context SET task is generated
-// 2. Context variables (${varName}) are interpolated into task configs
-// 3. Types are preserved (numbers stay numbers, bools stay bools)
+// 2. .Concat() on known values resolves immediately (no runtime JQ expressions)
+// 3. Multiple concatenations work correctly
 func TestCompileTimeVariableResolution(t *testing.T) {
 	// Create temporary output directory
 	outputDir := t.TempDir()
@@ -577,19 +580,10 @@ func TestCompileTimeVariableResolution(t *testing.T) {
 
 	// Create a workflow with context variables
 	err := stigmer.Run(func(ctx *stigmer.Context) error {
-		// Define context variables - these should be resolved at compile-time
+		// Define context variables that will be used with .Concat()
 		baseURL := ctx.SetString("baseURL", "https://api.example.com")
 		apiVersion := ctx.SetString("version", "v1")
-		maxRetries := ctx.SetInt("maxRetries", 3)
-		timeoutSecs := ctx.SetInt("timeout", 30)
-		isProd := ctx.SetBool("isProd", false)
-
-		// Use variables to avoid "declared but not used" errors
-		_ = baseURL
-		_ = apiVersion
-		_ = maxRetries
-		_ = timeoutSecs
-		_ = isProd
+		timeout := ctx.SetInt("timeout", 30)
 
 		// Create workflow
 		wf, err := workflow.New(ctx,
@@ -601,13 +595,17 @@ func TestCompileTimeVariableResolution(t *testing.T) {
 			return err
 		}
 
-		// Create an HTTP task with compile-time variable placeholders
-		// Use simple ${varName} strings (not .Concat() which creates runtime expressions)
-		// The second parameter to HttpGet() is the URI
+		// Create an HTTP task using .Concat() - should resolve immediately
+		// because all parts are known at synthesis time
+		endpoint := baseURL.Concat("/v1/users")
+		
 		wf.HttpGet("fetchAPI",
-			"${baseURL}/${version}/users", // COMPILE-TIME placeholder
-			workflow.Timeout("${timeout}"),
+			endpoint,           // Should be resolved to "https://api.example.com/v1/users"
+			workflow.Timeout(timeout),  // Pass IntRef directly (proper SDK pattern)
 		)
+		
+		// Use apiVersion to avoid "declared but not used" error
+		_ = apiVersion
 
 		return nil
 	})
@@ -683,18 +681,17 @@ func TestCompileTimeVariableResolution(t *testing.T) {
 		t.Errorf("URI = %v, want %v (compile-time interpolation failed)", uriValue, expectedURI)
 	}
 
-	// Verify timeout was interpolated (number, not string)
-	// Note: The timeout field name might vary - check task config structure
+	// Verify timeout was passed correctly (IntRef → number)
 	timeoutField, ok := fetchTask.TaskConfig.Fields["timeout_seconds"]
 	if ok {
 		timeoutValue := timeoutField.GetNumberValue()
 		if timeoutValue != 30 {
-			t.Logf("Note: Timeout field exists but value is %v (might be optional or have default)", timeoutValue)
+			t.Errorf("Timeout = %v, want 30", timeoutValue)
 		} else {
 			t.Logf("✅ Timeout interpolated as number: %v", timeoutValue)
 		}
 	} else {
-		t.Logf("Note: timeout_seconds field not found in config (might be optional)")
+		t.Error("timeout_seconds field not found in config")
 	}
 
 	t.Log("✅ Compile-time variable resolution VERIFIED:")

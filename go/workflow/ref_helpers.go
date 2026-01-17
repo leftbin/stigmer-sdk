@@ -34,22 +34,35 @@ type StringValue interface {
 }
 
 // toExpression converts various input types to expression strings.
-// This helper enables task builders to accept both legacy string values
-// and new typed Ref values, maintaining backward compatibility while
-// enabling type safety.
+// 
+// SMART RESOLUTION: If the value is a known constant (StringValue, IntValue, BoolValue),
+// returns the actual value. If it's a runtime expression (Ref without value), returns
+// the JQ expression.
+//
+// This enables the SDK to resolve values at synthesis time when possible, avoiding
+// unnecessary runtime JQ evaluation for static configuration.
 //
 // Supported types:
-//   - string: returned as-is (may contain expressions like "${.field}")
+//   - string: returned as-is
 //   - int, int32, int64: converted to string representation
 //   - bool: converted to string "true" or "false"
 //   - float32, float64: converted to string representation
-//   - Ref: calls Expression() to get JQ expression
+//   - StringValue: returns the known value (synthesis-time resolution)
+//   - IntValue: returns the known value as string
+//   - BoolValue: returns the known value as string
+//   - Ref: calls Expression() to get JQ expression (runtime resolution)
 //
-// Examples:
+// Examples (synthesis-time resolution):
 //
-//	toExpression("https://api.example.com")  // "https://api.example.com"
-//	toExpression(42)                          // "42"
-//	toExpression(ctx.SetString("url", "...")) // "${ $context.url }"
+//	apiBase := ctx.SetString("apiBase", "https://api.example.com")
+//	endpoint := apiBase.Concat("/users")
+//	toExpression(endpoint)  // "https://api.example.com/users" (resolved!)
+//
+// Examples (runtime resolution):
+//
+//	fetchTask := wf.HttpGet("fetch", "https://api.example.com")
+//	title := fetchTask.Field("title")
+//	toExpression(title)  // "${ $context.fetch.title }" (runtime JQ)
 func toExpression(value interface{}) string {
 	switch v := value.(type) {
 	case string:
@@ -66,8 +79,22 @@ func toExpression(value interface{}) string {
 		return fmt.Sprintf("%f", v)
 	case float64:
 		return fmt.Sprintf("%f", v)
+	
+	// SMART RESOLUTION: Check for known values BEFORE falling back to Expression()
+	case StringValue:
+		// This is a known string value - return it directly
+		return v.Value()
+	case IntValue:
+		// This is a known int value - convert to string
+		return fmt.Sprintf("%d", v.Value())
+	case BoolValue:
+		// This is a known bool value - convert to string
+		return fmt.Sprintf("%t", v.Value())
+	
+	// Runtime expression (task outputs, computed values)
 	case Ref:
 		return v.Expression()
+	
 	default:
 		// Fallback: convert to string
 		return fmt.Sprintf("%v", value)

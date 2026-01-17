@@ -86,44 +86,105 @@ func (s *StringRef) ToValue() interface{} {
 }
 
 // Concat creates a new StringRef that concatenates this string with other strings.
-// It generates a JQ expression for runtime concatenation.
+// 
+// SMART RESOLUTION: If all values are known at synthesis time (not runtime expressions),
+// the concatenation is computed immediately and returned as a resolved value.
+// Otherwise, it generates a JQ expression for runtime evaluation.
 //
-// Example:
+// Example (resolved at synthesis):
 //
 //	apiURL := ctx.SetString("apiURL", "https://api.example.com")
-//	endpoint := apiURL.Concat("/users/", userID)
-//	// Result: "${ $context.apiURL + "/users/" + $context.userID }"
+//	endpoint := apiURL.Concat("/users")
+//	// Result: value = "https://api.example.com/users" (resolved!)
+//
+// Example (runtime expression):
+//
+//	userID := fetchTask.Field("id")  // Runtime value from task output
+//	url := apiURL.Concat("/users/", userID)
+//	// Result: "${ $context.apiURL + "/users/" + $context.fetchTask.id }"
 func (s *StringRef) Concat(parts ...interface{}) *StringRef {
+	// Track if all parts are known values (can resolve immediately)
+	allKnown := !s.isComputed
+	
+	// Build both the resolved value AND the expression (we'll use one or the other)
+	var resolvedParts []string
 	var expressions []string
-	// Build the base expression
-	if s.isComputed {
-		expressions = append(expressions, s.rawExpression)
-	} else {
+	
+	// Add base value/expression
+	if !s.isComputed {
+		resolvedParts = append(resolvedParts, s.value)
 		expressions = append(expressions, fmt.Sprintf("$context.%s", s.name))
+	} else {
+		allKnown = false
+		expressions = append(expressions, s.rawExpression)
 	}
 
+	// Process each part
 	for _, part := range parts {
 		switch v := part.(type) {
 		case string:
-			// Literal string - quote it
+			// Literal string - always known
+			resolvedParts = append(resolvedParts, v)
 			expressions = append(expressions, fmt.Sprintf(`"%s"`, v))
+			
 		case *StringRef:
-			// Another StringRef - use its expression
-			if v.isComputed {
-				expressions = append(expressions, v.rawExpression)
-			} else {
+			// Another StringRef - check if it's known
+			if !v.isComputed {
+				resolvedParts = append(resolvedParts, v.value)
 				expressions = append(expressions, fmt.Sprintf("$context.%s", v.name))
+			} else {
+				allKnown = false
+				expressions = append(expressions, v.rawExpression)
 			}
+		
+		case *IntRef:
+			// IntRef - check if it's known
+			if !v.isComputed {
+				resolvedParts = append(resolvedParts, fmt.Sprintf("%d", v.value))
+				expressions = append(expressions, fmt.Sprintf("$context.%s", v.name))
+			} else {
+				allKnown = false
+				expressions = append(expressions, v.rawExpression)
+			}
+		
+		case *BoolRef:
+			// BoolRef - check if it's known
+			if !v.isComputed {
+				resolvedParts = append(resolvedParts, fmt.Sprintf("%t", v.value))
+				expressions = append(expressions, fmt.Sprintf("$context.%s", v.name))
+			} else {
+				allKnown = false
+				expressions = append(expressions, v.rawExpression)
+			}
+			
 		case Ref:
-			// Other Ref types - convert to string
+			// Other Ref types (like TaskFieldRef) - always runtime
+			allKnown = false
 			expressions = append(expressions, fmt.Sprintf("($context.%s | tostring)", v.Name()))
+			
 		default:
-			// Fallback - convert to string
+			// Fallback - literal value
+			resolvedParts = append(resolvedParts, fmt.Sprintf("%v", v))
 			expressions = append(expressions, fmt.Sprintf(`"%v"`, v))
 		}
 	}
 
-	// Store the expression WITHOUT the ${ } wrapper - Expression() will add it
+	// SMART DECISION: Can we resolve this now, or defer to runtime?
+	if allKnown {
+		// All parts are known - compute the final value NOW
+		finalValue := strings.Join(resolvedParts, "")
+		return &StringRef{
+			baseRef: baseRef{
+				name:         "", // Not a context variable, it's a resolved literal
+				isSecret:     s.isSecret,
+				isComputed:   false, // ← KEY: This is a known value!
+				rawExpression: "",
+			},
+			value: finalValue, // ← The actual resolved string
+		}
+	}
+
+	// At least one part is a runtime value - create expression
 	result := strings.Join(expressions, " + ")
 	return &StringRef{
 		baseRef: baseRef{
@@ -132,7 +193,7 @@ func (s *StringRef) Concat(parts ...interface{}) *StringRef {
 			isComputed:   true,
 			rawExpression: result,
 		},
-		value: "", // Computed value, not known at synthesis time
+		value: "", // Runtime value, not known at synthesis time
 	}
 }
 
