@@ -182,6 +182,9 @@ func TestCorrectAPIs(t *testing.T) {
 				"agent.New(ctx,",
 				"workflow.New(ctx,",
 				"stigmer.Run(",
+				"CallAgent(",           // Verify agent call feature is demonstrated
+				"workflow.Agent(",      // Verify agent reference
+				"ctx.SetString(",       // Verify context variables
 			},
 		},
 	}

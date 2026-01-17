@@ -93,7 +93,7 @@ func runWorkflow(ctx *stigmer.Context) error {
 	// SCENARIO 2: Using API Response in Next Call (Field References in Body!)
 	// ============================================================================
 	// REAL USE CASE: Get error from one API, pass it to ChatGPT for analysis
-	
+
 	// Simulate getting an error from GitHub API
 	githubStatus := wf.HttpGet("checkPipeline",
 		"https://api.github.com/repos/myorg/myrepo/actions/runs/latest",
@@ -165,9 +165,9 @@ func runWorkflow(ctx *stigmer.Context) error {
 			"source":   "tok_visa",
 			// ✅ Nested metadata with runtime env vars and field references
 			"metadata": map[string]any{
-				"environment":  workflow.RuntimeEnv("ENVIRONMENT"),
-				"region":       workflow.RuntimeEnv("AWS_REGION"),
-				"request_id":   processData.Field("id"),
+				"environment":   workflow.RuntimeEnv("ENVIRONMENT"),
+				"region":        workflow.RuntimeEnv("AWS_REGION"),
+				"request_id":    processData.Field("id"),
 				"ai_conclusion": analyzeError.Field("choices[0].message.content"),
 			},
 		}),
@@ -191,10 +191,10 @@ func runWorkflow(ctx *stigmer.Context) error {
 			"environment": workflow.RuntimeEnv("ENVIRONMENT"),
 			// ✅ Field references in body - store all the data
 			"data": map[string]any{
-				"openai_response":  callOpenAI.Field("choices[0].message.content"),
-				"error_analysis":   analyzeError.Field("choices[0].message.content"),
-				"processed_data":   processData.Field("result"),
-				"payment_status":   chargePayment.Field("status"),
+				"openai_response":   callOpenAI.Field("choices[0].message.content"),
+				"error_analysis":    analyzeError.Field("choices[0].message.content"),
+				"processed_data":    processData.Field("result"),
+				"payment_status":    chargePayment.Field("status"),
 				"github_conclusion": githubStatus.Field("conclusion"),
 			},
 		}),

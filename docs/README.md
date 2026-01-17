@@ -18,6 +18,9 @@ The Stigmer SDK provides language-specific SDKs for defining Agent blueprints. T
 
 ## Implementation Reports
 
+### Template System
+- [Init Template GitHub API Migration](./implementation/init-template-github-api-migration.md) - Migrated `stigmer init` template from JSONPlaceholder to GitHub API (2026-01-18)
+
 ### Buf Migration
 - [Buf Migration Complete](./implementation/buf-migration-complete.md) - Migration from GitHub to Buf Schema Registry (2026-01-13)
 
