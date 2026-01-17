@@ -1115,3 +1115,611 @@ func readProtoManifest(t *testing.T, path string, message proto.Message) {
 		t.Fatalf("Failed to unmarshal manifest %s: %v", path, err)
 	}
 }
+
+// ============================================================================
+// Agent-Workflow Integration Tests (Examples 15-19)
+// ============================================================================
+// TODO: Uncomment these tests after proto refactoring and open-sourcing
+// Currently commented out due to proto dependency issues
+
+/*
+// TestExample15_WorkflowCallingSimpleAgent tests the basic agent call pattern
+func TestExample15_WorkflowCallingSimpleAgent(t *testing.T) {
+	runExampleTest(t, "15_workflow_calling_simple_agent.go", func(t *testing.T, outputDir string) {
+		// Both agent and workflow manifests should be created
+		agentManifestPath := filepath.Join(outputDir, "agent-manifest.pb")
+		workflowManifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+
+		assertFileExists(t, agentManifestPath)
+		assertFileExists(t, workflowManifestPath)
+
+		// ========================================================================
+		// TEST 1: Verify agent manifest
+		// ========================================================================
+		var agentManifest agentv1.AgentManifest
+		readProtoManifest(t, agentManifestPath, &agentManifest)
+
+		if len(agentManifest.Agents) != 1 {
+			t.Fatalf("Expected 1 agent, got %d", len(agentManifest.Agents))
+		}
+
+		agent := agentManifest.Agents[0]
+		if agent.Name != "code-reviewer" {
+			t.Errorf("Agent name = %v, want code-reviewer", agent.Name)
+		}
+
+		if agent.Instructions == "" {
+			t.Error("Agent should have instructions")
+		}
+
+		// ========================================================================
+		// TEST 2: Verify workflow manifest
+		// ========================================================================
+		var workflowManifest workflowv1.WorkflowManifest
+		readProtoManifest(t, workflowManifestPath, &workflowManifest)
+
+		if len(workflowManifest.Workflows) != 1 {
+			t.Fatalf("Expected 1 workflow, got %d", len(workflowManifest.Workflows))
+		}
+
+		wf := workflowManifest.Workflows[0]
+		if wf.Spec == nil || wf.Spec.Document == nil {
+			t.Fatal("Workflow spec or document is nil")
+		}
+
+		if wf.Spec.Document.Name != "simple-review" {
+			t.Errorf("Workflow name = %v, want simple-review", wf.Spec.Document.Name)
+		}
+
+		// ========================================================================
+		// TEST 3: Verify agent call task exists
+		// ========================================================================
+		if len(wf.Spec.Tasks) != 1 {
+			t.Fatalf("Expected 1 task, got %d", len(wf.Spec.Tasks))
+		}
+
+		task := wf.Spec.Tasks[0]
+		if task.Name != "reviewCode" {
+			t.Errorf("Task name = %v, want reviewCode", task.Name)
+		}
+
+		// TODO: Uncomment when AGENT_CALL proto is published to buf.build
+		// Verify task kind is AGENT_CALL
+		// if task.Kind != workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_AGENT_CALL {
+		// 	t.Errorf("Task kind = %v, want WORKFLOW_TASK_KIND_AGENT_CALL", task.Kind)
+		// }
+
+		// ========================================================================
+		// TEST 4: Verify agent call configuration
+		// ========================================================================
+		if task.TaskConfig == nil {
+			t.Fatal("Task config is nil")
+		}
+
+		// Check agent reference field (stored as string slug)
+		agentField, ok := task.TaskConfig.Fields["agent"]
+		if !ok {
+			t.Fatal("Agent call task should have 'agent' field")
+		}
+
+		// Agent is stored as a string (the slug)
+		agentSlug := agentField.GetStringValue()
+		if agentSlug != "code-reviewer" {
+			t.Errorf("Agent slug = %v, want code-reviewer", agentSlug)
+		}
+
+		// ========================================================================
+		// TEST 5: Verify message field
+		// ========================================================================
+		messageField, ok := task.TaskConfig.Fields["message"]
+		if !ok {
+			t.Fatal("Agent call task should have 'message' field")
+		}
+
+		message := messageField.GetStringValue()
+		if message == "" {
+			t.Error("Message should not be empty")
+		}
+
+		// Message should contain the review request
+		if !containsSubstring(message, "review this function") {
+			t.Error("Message should contain review request")
+		}
+
+		t.Log("✅ Simple agent call verified:")
+		t.Log("   - Agent created: code-reviewer")
+		t.Log("   - Workflow created: simple-review")
+		t.Log("   - Agent call task configured correctly")
+		t.Logf("   - Agent slug: %s", agentSlug)
+	})
+}
+
+// TestExample16_WorkflowCallingAgentBySlug tests agent slug references
+func TestExample16_WorkflowCallingAgentBySlug(t *testing.T) {
+	runExampleTest(t, "16_workflow_calling_agent_by_slug.go", func(t *testing.T, outputDir string) {
+		workflowManifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+		assertFileExists(t, workflowManifestPath)
+
+		var manifest workflowv1.WorkflowManifest
+		readProtoManifest(t, workflowManifestPath, &manifest)
+
+		if len(manifest.Workflows) != 1 {
+			t.Fatalf("Expected 1 workflow, got %d", len(manifest.Workflows))
+		}
+
+		wf := manifest.Workflows[0]
+
+		// Should have 3 agent call tasks
+		if len(wf.Spec.Tasks) != 3 {
+			t.Fatalf("Expected 3 agent call tasks, got %d", len(wf.Spec.Tasks))
+		}
+
+		// ========================================================================
+		// TEST 1: Verify organization-scoped agent call
+		// ========================================================================
+		orgTask := wf.Spec.Tasks[0]
+		if orgTask.Name != "orgReview" {
+			t.Errorf("First task name = %v, want orgReview", orgTask.Name)
+		}
+
+		// Agent is stored as string slug
+		orgSlug := orgTask.TaskConfig.Fields["agent"].GetStringValue()
+		if orgSlug != "code-reviewer" {
+			t.Errorf("Org agent slug = %v, want code-reviewer", orgSlug)
+		}
+
+		// Scope field is separate (optional, defaults to organization)
+		if scopeField, ok := orgTask.TaskConfig.Fields["scope"]; ok {
+			scope := scopeField.GetStringValue()
+			if scope != "" && scope != "organization" {
+				t.Errorf("Org agent scope = %v, want empty or 'organization'", scope)
+			}
+		}
+
+		// ========================================================================
+		// TEST 2: Verify platform-scoped agent call
+		// ========================================================================
+		platformTask := wf.Spec.Tasks[1]
+		if platformTask.Name != "platformReview" {
+			t.Errorf("Second task name = %v, want platformReview", platformTask.Name)
+		}
+
+		// Agent is stored as string slug
+		platformSlug := platformTask.TaskConfig.Fields["agent"].GetStringValue()
+		if platformSlug != "security-scanner" {
+			t.Errorf("Platform agent slug = %v, want security-scanner", platformSlug)
+		}
+
+		// Scope should be platform (separate field)
+		scopeField, ok := platformTask.TaskConfig.Fields["scope"]
+		if !ok {
+			t.Error("Platform agent should have explicit 'scope' field")
+		} else {
+			scope := scopeField.GetStringValue()
+			if scope != "platform" {
+				t.Errorf("Platform agent scope = %v, want 'platform'", scope)
+			}
+		}
+
+		// ========================================================================
+		// TEST 3: Verify sequential agent calls
+		// ========================================================================
+		finalTask := wf.Spec.Tasks[2]
+		if finalTask.Name != "finalReview" {
+			t.Errorf("Third task name = %v, want finalReview", finalTask.Name)
+		}
+
+		t.Log("✅ Agent slug references verified:")
+		t.Log("   - Organization-scoped agent call")
+		t.Log("   - Platform-scoped agent call")
+		t.Log("   - Sequential agent execution")
+	})
+}
+
+// TestExample17_WorkflowAgentWithRuntimeSecrets tests runtime secret handling
+func TestExample17_WorkflowAgentWithRuntimeSecrets(t *testing.T) {
+	runExampleTest(t, "17_workflow_agent_with_runtime_secrets.go", func(t *testing.T, outputDir string) {
+		workflowManifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+		assertFileExists(t, workflowManifestPath)
+
+		var manifest workflowv1.WorkflowManifest
+		readProtoManifest(t, workflowManifestPath, &manifest)
+
+		wf := manifest.Workflows[0]
+
+		// ========================================================================
+		// CRITICAL SECURITY TEST: Runtime secrets as placeholders
+		// ========================================================================
+
+		// Find reviewPR agent task
+		var reviewTask *workflowv1.WorkflowTask
+		for _, task := range wf.Spec.Tasks {
+			if task.Name == "reviewPR" {
+				reviewTask = task
+				break
+			}
+		}
+
+		if reviewTask == nil {
+			t.Fatal("reviewPR task not found")
+		}
+
+		// ========================================================================
+		// TEST 1: Verify agent task has environment variables
+		// ========================================================================
+		envField, ok := reviewTask.TaskConfig.Fields["env"]
+		if !ok {
+			t.Fatal("Agent call task should have 'env' field")
+		}
+
+		envStruct := envField.GetStructValue()
+		if envStruct == nil {
+			t.Fatal("Env should be a struct")
+		}
+
+		// ========================================================================
+		// TEST 2: Verify GITHUB_TOKEN is a runtime secret placeholder
+		// ========================================================================
+		githubTokenField, ok := envStruct.Fields["GITHUB_TOKEN"]
+		if !ok {
+			t.Fatal("Env should have GITHUB_TOKEN")
+		}
+
+		githubToken := githubTokenField.GetStringValue()
+		t.Logf("GITHUB_TOKEN value: %s", githubToken)
+
+		// CRITICAL: Should be a placeholder, NOT actual secret
+		if !containsRuntimeRef(githubToken, "secrets", "GITHUB_TOKEN") {
+			t.Errorf("GITHUB_TOKEN should contain runtime secret placeholder, got: %s", githubToken)
+		}
+
+		// CRITICAL: Should NOT contain actual secret value
+		if containsSecretValue(githubToken) {
+			t.Errorf("❌ SECURITY VIOLATION: GITHUB_TOKEN contains actual secret: %s", githubToken)
+		}
+
+		// ========================================================================
+		// TEST 3: Verify PR_NUMBER is a runtime env var placeholder
+		// ========================================================================
+		prNumberField, ok := envStruct.Fields["PR_NUMBER"]
+		if !ok {
+			t.Fatal("Env should have PR_NUMBER")
+		}
+
+		prNumber := prNumberField.GetStringValue()
+		t.Logf("PR_NUMBER value: %s", prNumber)
+
+		if !containsRuntimeRef(prNumber, "env_vars", "PR_NUMBER") {
+			t.Errorf("PR_NUMBER should contain runtime env var placeholder, got: %s", prNumber)
+		}
+
+		// ========================================================================
+		// TEST 4: Verify static config values are NOT placeholders
+		// ========================================================================
+		repoOwnerField, ok := envStruct.Fields["REPO_OWNER"]
+		if !ok {
+			t.Fatal("Env should have REPO_OWNER")
+		}
+
+		repoOwner := repoOwnerField.GetStringValue()
+		if repoOwner != "myorg" {
+			t.Errorf("REPO_OWNER = %v, want myorg (static value)", repoOwner)
+		}
+
+		// ========================================================================
+		// TEST 5: Verify timeout configuration
+		// ========================================================================
+		configField, ok := reviewTask.TaskConfig.Fields["config"]
+		if !ok {
+			t.Fatal("Agent call should have execution config")
+		}
+
+		configStruct := configField.GetStructValue()
+		if configStruct == nil {
+			t.Fatal("Config should be a struct")
+		}
+
+		timeoutField, ok := configStruct.Fields["timeout"]
+		if !ok {
+			t.Fatal("Config should have timeout")
+		}
+
+		timeout := timeoutField.GetNumberValue()
+		if timeout != 600 {
+			t.Errorf("Timeout = %v, want 600", timeout)
+		}
+
+		t.Log("✅ Runtime secrets security verified:")
+		t.Log("   - Secrets appear as placeholders: ${.secrets.GITHUB_TOKEN}")
+		t.Log("   - Env vars appear as placeholders: ${.env_vars.PR_NUMBER}")
+		t.Log("   - Static values are direct: myorg")
+		t.Log("   - NO actual secret values in manifest")
+		t.Log("   - Execution timeout configured: 600s")
+	})
+}
+
+// TestExample18_WorkflowMultiAgentOrchestration tests complex multi-agent workflows
+func TestExample18_WorkflowMultiAgentOrchestration(t *testing.T) {
+	runExampleTest(t, "18_workflow_multi_agent_orchestration.go", func(t *testing.T, outputDir string) {
+		// Both manifests should exist
+		agentManifestPath := filepath.Join(outputDir, "agent-manifest.pb")
+		workflowManifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+
+		assertFileExists(t, agentManifestPath)
+		assertFileExists(t, workflowManifestPath)
+
+		// ========================================================================
+		// TEST 1: Verify all specialized agents are created
+		// ========================================================================
+		var agentManifest agentv1.AgentManifest
+		readProtoManifest(t, agentManifestPath, &agentManifest)
+
+		if len(agentManifest.Agents) != 5 {
+			t.Fatalf("Expected 5 specialized agents, got %d", len(agentManifest.Agents))
+		}
+
+		expectedAgents := []string{
+			"security-scanner",
+			"code-reviewer",
+			"performance-analyzer",
+			"devops-planner",
+			"qa-verifier",
+		}
+
+		for i, expectedName := range expectedAgents {
+			if agentManifest.Agents[i].Name != expectedName {
+				t.Errorf("Agent %d name = %v, want %v", i, agentManifest.Agents[i].Name, expectedName)
+			}
+		}
+
+		// ========================================================================
+		// TEST 2: Verify workflow pipeline structure
+		// ========================================================================
+		var workflowManifest workflowv1.WorkflowManifest
+		readProtoManifest(t, workflowManifestPath, &workflowManifest)
+
+		wf := workflowManifest.Workflows[0]
+
+		// Should have 9 tasks:
+		// 1. fetchPR (HTTP)
+		// 2. securityScan (Agent)
+		// 3. codeReview (Agent)
+		// 4. performanceAnalysis (Agent)
+		// 5. aggregateResults (SET)
+		// 6. generateDeploymentPlan (Agent)
+		// 7. executeDeploy (HTTP)
+		// 8. verifyDeployment (Agent)
+		// 9. notifyTeam (HTTP)
+		if len(wf.Spec.Tasks) != 9 {
+			t.Fatalf("Expected 9 tasks in pipeline, got %d", len(wf.Spec.Tasks))
+		}
+
+		// TODO: Uncomment when AGENT_CALL proto is published to buf.build
+		// Verify task kinds
+		// expectedTasks := []struct {
+		// 	name     string
+		// 	kind     workflowv1.WorkflowTaskKind
+		// 	isAgent  bool
+		// }{
+		// 	{"fetchPR", workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_HTTP_CALL, false},
+		// 	{"securityScan", workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_AGENT_CALL, true},
+		// 	{"codeReview", workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_AGENT_CALL, true},
+		// 	{"performanceAnalysis", workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_AGENT_CALL, true},
+		// 	{"aggregateResults", workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_SET, false},
+		// 	{"generateDeploymentPlan", workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_AGENT_CALL, true},
+		// 	{"executeDeploy", workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_HTTP_CALL, false},
+		// 	{"verifyDeployment", workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_AGENT_CALL, true},
+		// 	{"notifyTeam", workflowv1.WorkflowTaskKind_WORKFLOW_TASK_KIND_HTTP_CALL, false},
+		// }
+		//
+		// for i, expected := range expectedTasks {
+		// 	task := wf.Spec.Tasks[i]
+		// 	if task.Name != expected.name {
+		// 		t.Errorf("Task %d name = %v, want %v", i, task.Name, expected.name)
+		// 	}
+		// 	if task.Kind != expected.kind {
+		// 		t.Errorf("Task %d kind = %v, want %v", i, task.Kind, expected.kind)
+		// 	}
+		// }
+		
+		// For now, just verify task names exist
+		expectedTaskNames := []string{
+			"fetchPR", "securityScan", "codeReview", "performanceAnalysis",
+			"aggregateResults", "generateDeploymentPlan", "executeDeploy",
+			"verifyDeployment", "notifyTeam",
+		}
+		
+		for i, expectedName := range expectedTaskNames {
+			task := wf.Spec.Tasks[i]
+			if task.Name != expectedName {
+				t.Errorf("Task %d name = %v, want %v", i, task.Name, expectedName)
+			}
+		}
+
+		// ========================================================================
+		// TEST 3: Verify agent tasks have environment variables
+		// ========================================================================
+		securityTask := wf.Spec.Tasks[1] // securityScan
+		envField := securityTask.TaskConfig.Fields["env"].GetStructValue()
+		if envField == nil {
+			t.Fatal("Security scan should have environment variables")
+		}
+
+		// Verify GITHUB_TOKEN is passed
+		if _, ok := envField.Fields["GITHUB_TOKEN"]; !ok {
+			t.Error("Security scan should have GITHUB_TOKEN env var")
+		}
+
+		// ========================================================================
+		// TEST 4: Verify execution timeouts are set
+		// ========================================================================
+		// All agent tasks should have timeout of 300s (5 minutes) except final verification
+		agentTasks := []int{1, 2, 3, 5, 7} // indices of agent tasks
+		for _, idx := range agentTasks[:4] {
+			task := wf.Spec.Tasks[idx]
+			configField := task.TaskConfig.Fields["config"].GetStructValue()
+			if configField != nil {
+				if timeoutField, ok := configField.Fields["timeout"]; ok {
+					timeout := timeoutField.GetNumberValue()
+					if timeout != 300 && timeout != 180 { // Some tasks have different timeouts
+						// This is OK, just log it
+						t.Logf("Task %s has timeout: %v", task.Name, timeout)
+					}
+				}
+			}
+		}
+
+		// verifyDeployment should have longer timeout (600s)
+		verifyTask := wf.Spec.Tasks[7]
+		configField := verifyTask.TaskConfig.Fields["config"].GetStructValue()
+		if configField != nil {
+			if timeoutField, ok := configField.Fields["timeout"]; ok {
+				timeout := timeoutField.GetNumberValue()
+				if timeout != 600 {
+					t.Errorf("verifyDeployment timeout = %v, want 600", timeout)
+				}
+			}
+		}
+
+		t.Log("✅ Multi-agent orchestration verified:")
+		t.Logf("   - Agents created: %d (security, code-review, performance, devops, qa)", len(agentManifest.Agents))
+		t.Logf("   - Pipeline tasks: %d", len(wf.Spec.Tasks))
+		t.Log("   - Agent calls: 5")
+		t.Log("   - HTTP calls: 3")
+		t.Log("   - Data aggregation: 1")
+		t.Log("   - Environment variables passed to agents")
+		t.Log("   - Execution timeouts configured")
+	})
+}
+
+// TestExample19_WorkflowAgentExecutionConfig tests agent execution configuration
+func TestExample19_WorkflowAgentExecutionConfig(t *testing.T) {
+	runExampleTest(t, "19_workflow_agent_execution_config.go", func(t *testing.T, outputDir string) {
+		workflowManifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+		assertFileExists(t, workflowManifestPath)
+
+		var manifest workflowv1.WorkflowManifest
+		readProtoManifest(t, workflowManifestPath, &manifest)
+
+		wf := manifest.Workflows[0]
+
+		// Should have 6 tasks with different execution configs
+		if len(wf.Spec.Tasks) != 6 {
+			t.Fatalf("Expected 6 tasks, got %d", len(wf.Spec.Tasks))
+		}
+
+		// ========================================================================
+		// TEST 1: Fast deterministic task (categorizeTicket)
+		// ========================================================================
+		categorizeTask := wf.Spec.Tasks[0]
+		if categorizeTask.Name != "categorizeTicket" {
+			t.Errorf("First task name = %v, want categorizeTicket", categorizeTask.Name)
+		}
+
+		categorizeConfig := categorizeTask.TaskConfig.Fields["config"].GetStructValue()
+		if categorizeConfig == nil {
+			t.Fatal("categorizeTicket should have execution config")
+		}
+
+		// Should use claude-3-haiku (fast model)
+		if modelField, ok := categorizeConfig.Fields["model"]; ok {
+			model := modelField.GetStringValue()
+			if model != "claude-3-haiku" {
+				t.Errorf("categorizeTicket model = %v, want claude-3-haiku", model)
+			}
+		} else {
+			t.Error("categorizeTicket should specify model")
+		}
+
+		// Should have low temperature (0.1)
+		if tempField, ok := categorizeConfig.Fields["temperature"]; ok {
+			temp := tempField.GetNumberValue()
+			if temp != 0.1 {
+				t.Errorf("categorizeTicket temperature = %v, want 0.1", temp)
+			}
+		} else {
+			t.Error("categorizeTicket should specify temperature")
+		}
+
+		// Should have short timeout (30s)
+		if timeoutField, ok := categorizeConfig.Fields["timeout"]; ok {
+			timeout := timeoutField.GetNumberValue()
+			if timeout != 30 {
+				t.Errorf("categorizeTicket timeout = %v, want 30", timeout)
+			}
+		} else {
+			t.Error("categorizeTicket should specify timeout")
+		}
+
+		// ========================================================================
+		// TEST 2: Creative task (generateCopy)
+		// ========================================================================
+		generateTask := wf.Spec.Tasks[2]
+		if generateTask.Name != "generateCopy" {
+			t.Errorf("Third task name = %v, want generateCopy", generateTask.Name)
+		}
+
+		generateConfig := generateTask.TaskConfig.Fields["config"].GetStructValue()
+		if generateConfig == nil {
+			t.Fatal("generateCopy should have execution config")
+		}
+
+		// Should have high temperature (0.9) for creativity
+		if tempField, ok := generateConfig.Fields["temperature"]; ok {
+			temp := tempField.GetNumberValue()
+			if temp != 0.9 {
+				t.Errorf("generateCopy temperature = %v, want 0.9 (creative)", temp)
+			}
+		}
+
+		// ========================================================================
+		// TEST 3: Maximum determinism task (extractData)
+		// ========================================================================
+		extractTask := wf.Spec.Tasks[3]
+		if extractTask.Name != "extractData" {
+			t.Errorf("Fourth task name = %v, want extractData", extractTask.Name)
+		}
+
+		extractConfig := extractTask.TaskConfig.Fields["config"].GetStructValue()
+		if extractConfig == nil {
+			t.Fatal("extractData should have execution config")
+		}
+
+		// Should have temperature 0.0 (maximum determinism)
+		if tempField, ok := extractConfig.Fields["temperature"]; ok {
+			temp := tempField.GetNumberValue()
+			if temp != 0.0 {
+				t.Errorf("extractData temperature = %v, want 0.0 (maximum determinism)", temp)
+			}
+		}
+
+		// ========================================================================
+		// TEST 4: Real-time task (customerSupport)
+		// ========================================================================
+		supportTask := wf.Spec.Tasks[5]
+		if supportTask.Name != "customerSupport" {
+			t.Errorf("Sixth task name = %v, want customerSupport", supportTask.Name)
+		}
+
+		supportConfig := supportTask.TaskConfig.Fields["config"].GetStructValue()
+		if supportConfig == nil {
+			t.Fatal("customerSupport should have execution config")
+		}
+
+		// Should have very short timeout (15s) for real-time response
+		if timeoutField, ok := supportConfig.Fields["timeout"]; ok {
+			timeout := timeoutField.GetNumberValue()
+			if timeout != 15 {
+				t.Errorf("customerSupport timeout = %v, want 15 (real-time!)", timeout)
+			}
+		}
+
+		t.Log("✅ Agent execution configuration verified:")
+		t.Log("   - Fast deterministic: haiku, temp=0.1, timeout=30s")
+		t.Log("   - Creative task: sonnet, temp=0.9, timeout=120s")
+		t.Log("   - Maximum determinism: haiku, temp=0.0")
+		t.Log("   - Real-time: haiku, timeout=15s")
+		t.Log("   - Different configs for different use cases!")
+	})
+}
+*/

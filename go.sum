@@ -1,7 +1,5 @@
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20251209175733-2a1774d88802.1 h1:j9yeqTWEFrtimt8Nng2MIeRrpoCvQzM9/g25XTvqUGg=
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20251209175733-2a1774d88802.1/go.mod h1:tvtbpgaVXZX4g6Pn+AnzFycuRK3MOz5HJfEGeEllXYM=
-buf.build/gen/go/leftbin/stigmer/protocolbuffers/go v1.36.11-20260116195247-3f1bb4a83c5d.1 h1:5ddv2F0qnN9hREhcxaRHVZYHldRVDXH+FSD6LNfdJaU=
-buf.build/gen/go/leftbin/stigmer/protocolbuffers/go v1.36.11-20260116195247-3f1bb4a83c5d.1/go.mod h1:oNb9Xms15Zr8fSaQgRalfwW5Kw8pE8FjP9o7OkX4LjA=
 buf.build/gen/go/leftbin/stigmer/protocolbuffers/go v1.36.11-20260117165112-7fae00756daa.1 h1:pcy6Na0M7pN6rBlyDMrJO9X7DecDtbwT7lfZxAWBptI=
 buf.build/gen/go/leftbin/stigmer/protocolbuffers/go v1.36.11-20260117165112-7fae00756daa.1/go.mod h1:oNb9Xms15Zr8fSaQgRalfwW5Kw8pE8FjP9o7OkX4LjA=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
