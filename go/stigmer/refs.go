@@ -6,11 +6,17 @@ import (
 )
 
 // Ref is the base interface for all typed references.
-// A Ref represents a reference to a variable in the workflow context
-// that will be resolved at runtime using JQ expressions.
+// A Ref represents a variable that can be used in two ways:
 //
-// All Ref types must implement Expression() to generate the JQ expression
-// that references the value in the workflow context.
+// 1. Compile-time resolution: ${variableName} placeholders are replaced with
+//    actual values during synthesis. This is the default for context variables.
+//
+// 2. Runtime resolution: ${ $context.variableName } JQ expressions are evaluated
+//    at workflow execution time. This is used for computed values and task outputs.
+//
+// All Ref types must implement:
+// - Expression(): Generate JQ expressions for runtime evaluation
+// - ToValue(): Provide the value for compile-time interpolation
 type Ref interface {
 	// Expression returns the JQ expression that references this value.
 	// For example: "${ $context.apiURL }"

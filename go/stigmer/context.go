@@ -73,12 +73,13 @@ func NewContext() *Context {
 // =============================================================================
 
 // SetString creates a string variable in the context and returns a typed reference.
-// The variable can be used in workflows and agents, and will be resolved at runtime.
+// The variable is resolved at synthesis time (compile-time) by interpolating ${variableName}
+// placeholders in task configurations with the actual value.
 //
 // Example:
 //
 //	apiURL := ctx.SetString("apiURL", "https://api.example.com")
-//	// Use apiURL in task builders: task.WithURI(apiURL)
+//	// In task config: "${apiURL}/users" → synthesizes to: "https://api.example.com/users"
 func (c *Context) SetString(name, value string) *StringRef {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -95,12 +96,13 @@ func (c *Context) SetString(name, value string) *StringRef {
 }
 
 // SetSecret creates a secret string variable in the context.
-// Secrets are marked as sensitive and may be handled differently during synthesis.
+// Secrets are marked as sensitive and resolved at synthesis time like other variables.
+// The secret value is baked into the task configuration during synthesis.
 //
 // Example:
 //
 //	apiKey := ctx.SetSecret("apiKey", "secret-key-123")
-//	// Use in headers: task.WithHeader("Authorization", apiKey.Prepend("Bearer "))
+//	// In headers: "Bearer ${apiKey}" → synthesizes to: "Bearer secret-key-123"
 func (c *Context) SetSecret(name, value string) *StringRef {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -117,11 +119,12 @@ func (c *Context) SetSecret(name, value string) *StringRef {
 }
 
 // SetInt creates an integer variable in the context and returns a typed reference.
+// The variable is resolved at synthesis time (compile-time).
 //
 // Example:
 //
 //	retries := ctx.SetInt("retries", 3)
-//	// Use in task builders: task.WithMaxRetries(retries)
+//	// In config: {"max_retries": "${retries}"} → synthesizes to: {"max_retries": 3}
 func (c *Context) SetInt(name string, value int) *IntRef {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -138,11 +141,12 @@ func (c *Context) SetInt(name string, value int) *IntRef {
 }
 
 // SetBool creates a boolean variable in the context and returns a typed reference.
+// The variable is resolved at synthesis time (compile-time).
 //
 // Example:
 //
 //	isProd := ctx.SetBool("isProd", true)
-//	// Use in conditionals: workflow.If(isProd, ...)
+//	// In config: {"production": "${isProd}"} → synthesizes to: {"production": true}
 func (c *Context) SetBool(name string, value bool) *BoolRef {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -159,6 +163,7 @@ func (c *Context) SetBool(name string, value bool) *BoolRef {
 }
 
 // SetObject creates an object (map) variable in the context and returns a typed reference.
+// The variable is resolved at synthesis time (compile-time).
 //
 // Example:
 //
@@ -168,7 +173,7 @@ func (c *Context) SetBool(name string, value bool) *BoolRef {
 //	        "port": 5432,
 //	    },
 //	})
-//	dbHost := config.FieldAsString("database", "host")
+//	// In config: "${config}" → synthesizes to: {"database": {"host": "localhost", "port": 5432}}
 func (c *Context) SetObject(name string, value map[string]interface{}) *ObjectRef {
 	c.mu.Lock()
 	defer c.mu.Unlock()

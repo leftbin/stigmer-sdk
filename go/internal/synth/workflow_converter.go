@@ -125,13 +125,20 @@ func workflowSpecToProto(wf *workflow.Workflow) (*workflowv1.WorkflowSpec, error
 	return workflowSpecToProtoWithContext(wf, nil)
 }
 
-// workflowSpecToProtoWithContext converts workflow spec to proto with context variable injection.
+// workflowSpecToProtoWithContext converts workflow spec to proto with context variable interpolation.
 //
-// If contextVars is provided and non-empty, a SET task named "__stigmer_init_context" is
-// automatically injected as the first task to initialize the workflow context.
+// If contextVars is provided and non-empty, variables are resolved at compile-time
+// by interpolating ${variableName} placeholders in task configurations with their actual values.
 //
-// This follows the Pulumi pattern where SDK context variables are automatically available
-// at runtime without manual wiring.
+// This is a compile-time approach: instead of creating a runtime SET task, we bake
+// variable values directly into task configurations during synthesis.
+//
+// Example:
+//   ctx.SetString("baseURL", "https://api.example.com")
+//   task.WithURI("${baseURL}/users")
+//   
+//   Synthesizes to:
+//   task_config: { "endpoint": { "uri": "https://api.example.com/users" } }
 func workflowSpecToProtoWithContext(wf *workflow.Workflow, contextVars map[string]interface{}) (*workflowv1.WorkflowSpec, error) {
 	spec := &workflowv1.WorkflowSpec{
 		Description: wf.Description,
@@ -145,18 +152,12 @@ func workflowSpecToProtoWithContext(wf *workflow.Workflow, contextVars map[strin
 		Tasks: []*workflowv1.WorkflowTask{},
 	}
 
-	// Inject context initialization task if context variables exist
-	if len(contextVars) > 0 {
-		contextInitTask, err := createContextInitTask(contextVars)
-		if err != nil {
-			return nil, fmt.Errorf("creating context init task: %w", err)
-		}
-		spec.Tasks = append(spec.Tasks, contextInitTask)
-	}
+	// REMOVED: No longer inject __stigmer_init_context SET task
+	// Variables are now resolved at compile-time via interpolation
 
-	// Convert user-defined tasks
+	// Convert user-defined tasks with variable interpolation
 	for i, task := range wf.Tasks {
-		protoTask, err := taskToProto(task)
+		protoTask, err := taskToProtoWithInterpolation(task, contextVars)
 		if err != nil {
 			return nil, fmt.Errorf("converting task[%d] %s: %w", i, task.Name, err)
 		}
@@ -173,78 +174,59 @@ func workflowSpecToProtoWithContext(wf *workflow.Workflow, contextVars map[strin
 
 // createContextInitTask creates a SET task that initializes workflow context variables.
 //
-// This task is automatically injected as the first task in workflows when context variables
-// are defined via ctx.SetString(), ctx.SetInt(), etc.
+// DEPRECATED: This function is no longer used.
 //
-// The task sets all context variables to their initial values, making them available
-// for use in subsequent tasks via JQ expressions like "${ $context.variableName }".
+// We've moved from runtime variable resolution (SET task) to compile-time interpolation.
+// Variables are now resolved during synthesis via InterpolateVariables() and baked
+// directly into task configurations.
 //
-// Task structure:
-//   - name: __stigmer_init_context
-//   - kind: SET
-//   - task_config:
-//       variables:
-//         variableName1: value1
-//         variableName2: value2
+// This function is kept for reference but should not be called.
 //
-// Note: The contextVars map values must implement the Ref interface with ToValue() method.
+// Migration:
+//   OLD: Generate __stigmer_init_context SET task, resolve ${var} at runtime
+//   NEW: Interpolate ${var} during synthesis, bake values into task configs
 func createContextInitTask(contextVars map[string]interface{}) (*workflowv1.WorkflowTask, error) {
-	// Import the Ref interface to access ToValue()
-	// We need to import the parent package, but to avoid circular imports,
-	// we'll use type assertion with interface{} and call ToValue via reflection
-	// Actually, we can't import stigmer package here due to circular dependency
-	// So we need to pass already-serialized values from the context
-
-	// Build variables map for the SET task
-	variables := make(map[string]interface{}, len(contextVars))
-	for name, refInterface := range contextVars {
-		// The contextVars map contains Ref interface values
-		// We need to call ToValue() on each one
-		// Use type assertion to access the ToValue() method
-		type valueExtractor interface {
-			ToValue() interface{}
-		}
-		
-		if ref, ok := refInterface.(valueExtractor); ok {
-			variables[name] = ref.ToValue()
-		} else {
-			// Fallback: use the value as-is (shouldn't happen if called correctly)
-			variables[name] = refInterface
-		}
-	}
-
-	// Create SET task config
-	setConfig := map[string]interface{}{
-		"variables": variables,
-	}
-
-	// Convert to protobuf Struct
-	taskConfigStruct, err := structpb.NewStruct(setConfig)
-	if err != nil {
-		return nil, fmt.Errorf("creating task config struct: %w", err)
-	}
-
-	// Build the context init task
-	task := &workflowv1.WorkflowTask{
-		Name:       "__stigmer_init_context",
-		Kind:       apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_SET,
-		TaskConfig: taskConfigStruct,
-		// CRITICAL: Must export variables to make them accessible via $context.variableName
-		Export: &workflowv1.Export{
-			As: "${.}",  // Export all variables to context
-		},
-		// No flow control - tasks will execute sequentially
-	}
-
-	return task, nil
+	// This function should no longer be called
+	// If you see this error, the code is still using the old runtime resolution pattern
+	return nil, fmt.Errorf("createContextInitTask is deprecated - use compile-time interpolation instead")
 }
 
 // taskToProto converts a workflow.Task to a workflowv1.WorkflowTask proto.
+// This version does not interpolate context variables.
 func taskToProto(task *workflow.Task) (*workflowv1.WorkflowTask, error) {
+	return taskToProtoWithInterpolation(task, nil)
+}
+
+// taskToProtoWithInterpolation converts a workflow.Task to a workflowv1.WorkflowTask proto
+// with compile-time variable interpolation.
+//
+// If contextVars is provided, any ${variableName} placeholders in the task configuration
+// are replaced with their actual values during synthesis (compile-time resolution).
+//
+// This eliminates the need for runtime variable resolution via a SET task.
+func taskToProtoWithInterpolation(task *workflow.Task, contextVars map[string]interface{}) (*workflowv1.WorkflowTask, error) {
 	// Convert task config to google.protobuf.Struct
 	taskConfig, err := taskConfigToStruct(task)
 	if err != nil {
 		return nil, fmt.Errorf("converting task config: %w", err)
+	}
+
+	// Apply variable interpolation if context variables exist
+	if len(contextVars) > 0 {
+		// Convert Struct to map for interpolation
+		configMap := taskConfig.AsMap()
+		
+		// Interpolate variables
+		interpolatedMap, err := InterpolateVariables(configMap, contextVars)
+		if err != nil {
+			return nil, fmt.Errorf("interpolating variables in task %s: %w", task.Name, err)
+		}
+		
+		// Convert back to Struct
+		taskConfig, err = structpb.NewStruct(interpolatedMap)
+		if err != nil {
+			return nil, fmt.Errorf("converting interpolated config to struct: %w", err)
+		}
 	}
 
 	protoTask := &workflowv1.WorkflowTask{
