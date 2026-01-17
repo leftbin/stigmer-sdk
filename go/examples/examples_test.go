@@ -598,12 +598,12 @@ func TestCompileTimeVariableResolution(t *testing.T) {
 		// Create an HTTP task using .Concat() - should resolve immediately
 		// because all parts are known at synthesis time
 		endpoint := baseURL.Concat("/v1/users")
-		
+
 		wf.HttpGet("fetchAPI",
-			endpoint,           // Should be resolved to "https://api.example.com/v1/users"
-			workflow.Timeout(timeout),  // Pass IntRef directly (proper SDK pattern)
+			endpoint,                  // Should be resolved to "https://api.example.com/v1/users"
+			workflow.Timeout(timeout), // Pass IntRef directly (proper SDK pattern)
 		)
-		
+
 		// Use apiVersion to avoid "declared but not used" error
 		_ = apiVersion
 
