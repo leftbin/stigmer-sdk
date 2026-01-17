@@ -1,5 +1,8 @@
 # Stigmer Agent SDK Go - Makefile
 
+# Default bump type for releases (can be overridden: make release bump=minor)
+bump ?= patch
+
 .PHONY: help
 help: ## Display this help message
 	@echo "Stigmer Agent SDK Go - Available targets:"
@@ -90,20 +93,60 @@ update-deps: ## Update buf proto dependencies to latest
 	@grep "buf.build/gen/go" ../go.mod
 
 .PHONY: release
-release: ## Create and push a release tag (usage: make release TAG=v0.1.3)
-ifndef TAG
-	@echo "ERROR: TAG is required. Usage: make release TAG=v0.1.3"
-	@exit 1
-endif
-	@echo "Creating release tag: $(TAG)"
-	@if git rev-parse "$(TAG)" >/dev/null 2>&1; then \
-		echo "ERROR: Tag $(TAG) already exists"; \
-		exit 1; \
-	fi
-	@git tag -a "$(TAG)" -m "Release $(TAG)"
-	@git push origin "$(TAG)"
-	@echo "✓ Release tag $(TAG) created and pushed successfully!"
+release: ## Create and push a release tag (usage: make release [bump=patch|minor|major])
+	@echo "🏷️  Auto-incrementing version tag..."
 	@echo ""
-	@echo "View release: https://github.com/leftbin/stigmer-sdk/releases/tag/$(TAG)"
+	@# Get the latest tag, default to v0.0.0 if none exists
+	@LATEST_TAG=$$(git tag -l "v*" | sort -V | tail -n1); \
+	if [ -z "$$LATEST_TAG" ]; then \
+		LATEST_TAG="v0.0.0"; \
+		echo "No existing tags found. Starting from $$LATEST_TAG"; \
+	else \
+		echo "Latest tag: $$LATEST_TAG"; \
+	fi; \
+	\
+	VERSION=$$(echo $$LATEST_TAG | sed 's/^v//'); \
+	MAJOR=$$(echo $$VERSION | cut -d. -f1); \
+	MINOR=$$(echo $$VERSION | cut -d. -f2); \
+	PATCH=$$(echo $$VERSION | cut -d. -f3); \
+	\
+	echo "Bump type: $(bump)"; \
+	echo ""; \
+	\
+	case $(bump) in \
+		major) \
+			MAJOR=$$((MAJOR + 1)); \
+			MINOR=0; \
+			PATCH=0; \
+			;; \
+		minor) \
+			MINOR=$$((MINOR + 1)); \
+			PATCH=0; \
+			;; \
+		patch) \
+			PATCH=$$((PATCH + 1)); \
+			;; \
+		*) \
+			echo "ERROR: Invalid bump type '$(bump)'. Use: patch, minor, or major"; \
+			exit 1; \
+			;; \
+	esac; \
+	\
+	NEW_TAG="v$$MAJOR.$$MINOR.$$PATCH"; \
+	echo "New tag: $$NEW_TAG"; \
+	echo ""; \
+	\
+	if git rev-parse "$$NEW_TAG" >/dev/null 2>&1; then \
+		echo "ERROR: Tag $$NEW_TAG already exists"; \
+		exit 1; \
+	fi; \
+	\
+	echo "Creating release tag: $$NEW_TAG"; \
+	git tag -a "$$NEW_TAG" -m "Release $$NEW_TAG"; \
+	git push origin "$$NEW_TAG"; \
+	echo ""; \
+	echo "✓ Release tag $$NEW_TAG created and pushed successfully!"; \
+	echo ""; \
+	echo "View release: https://github.com/leftbin/stigmer-sdk/releases/tag/$$NEW_TAG"
 
 .DEFAULT_GOAL := help

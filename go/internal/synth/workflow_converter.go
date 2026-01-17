@@ -266,9 +266,10 @@ func taskKindToProtoKind(kind workflow.TaskKind) apiresource.WorkflowTaskKind {
 		workflow.TaskKindFork:         apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_FORK,
 		workflow.TaskKindTry:          apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_TRY,
 		workflow.TaskKindListen:       apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_LISTEN,
-		workflow.TaskKindWait:         apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_WAIT,
-		workflow.TaskKindRaise:        apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RAISE,
-		workflow.TaskKindRun:          apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RUN,
+		workflow.TaskKindWait:      apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_WAIT,
+		workflow.TaskKindRaise:     apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RAISE,
+		workflow.TaskKindRun:       apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RUN,
+		workflow.TaskKindAgentCall: apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_AGENT_CALL,
 	}
 	return kindMap[kind]
 }
@@ -365,6 +366,61 @@ func convertNestedTasksToMaps(tasks []workflow.Task) ([]interface{}, error) {
 	return result, nil
 }
 
+// convertToProtobufCompatible recursively converts a value to be compatible with structpb.NewStruct.
+// This handles:
+// 1. TaskFieldRef → Expression() string
+// 2. Nested maps and slices
+// 3. All Go types that protobuf Struct supports
+func convertToProtobufCompatible(v interface{}) interface{} {
+	if v == nil {
+		return nil
+	}
+
+	switch val := v.(type) {
+	case workflow.TaskFieldRef:
+		// Convert TaskFieldRef to its expression string
+		return val.Expression()
+		
+	case map[string]interface{}:
+		// Recursively process map values
+		// Note: map[string]any is handled here too (any is alias for interface{})
+		result := make(map[string]interface{}, len(val))
+		for k, v := range val {
+			result[k] = convertToProtobufCompatible(v)
+		}
+		return result
+		
+	case map[string]string:
+		// Convert to map[string]interface{}
+		return stringMapToInterface(val)
+		
+	case []interface{}:
+		// Recursively process slice elements
+		result := make([]interface{}, len(val))
+		for i, elem := range val {
+			result[i] = convertToProtobufCompatible(elem)
+		}
+		return result
+		
+	case []map[string]interface{}:
+		// Convert slice of maps
+		// Note: []map[string]any is handled here too (any is alias for interface{})
+		result := make([]interface{}, len(val))
+		for i, elem := range val {
+			result[i] = convertToProtobufCompatible(elem)
+		}
+		return result
+		
+	case []string:
+		// Convert to []interface{}
+		return stringSliceToInterfaceSlice(val)
+		
+	default:
+		// For primitives (string, int, float, bool), return as-is
+		return v
+	}
+}
+
 // taskConfigToStruct converts task configuration to google.protobuf.Struct.
 func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 	var configMap map[string]interface{}
@@ -384,7 +440,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 				"uri": cfg.URI,
 			},
 			"headers":         stringMapToInterface(cfg.Headers),
-			"body":            cfg.Body,
+			"body":            convertToProtobufCompatible(cfg.Body), // FIX: Handle TaskFieldRef and nested structures
 			"timeout_seconds": cfg.TimeoutSeconds,
 		}
 
@@ -393,7 +449,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 		configMap = map[string]interface{}{
 			"service": cfg.Service,
 			"method":  cfg.Method,
-			"body":    cfg.Body,
+			"body":    convertToProtobufCompatible(cfg.Body), // FIX: Handle TaskFieldRef and nested structures
 		}
 
 	case workflow.TaskKindSwitch:
@@ -528,7 +584,7 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 		cfg := task.Config.(*workflow.CallActivityTaskConfig)
 		configMap = map[string]interface{}{
 			"activity": cfg.Activity,
-			"input":    cfg.Input,
+			"input":    convertToProtobufCompatible(cfg.Input), // FIX: Handle TaskFieldRef
 		}
 
 	case workflow.TaskKindRaise:
@@ -536,14 +592,44 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 		configMap = map[string]interface{}{
 			"error":   cfg.Error,
 			"message": cfg.Message,
-			"data":    cfg.Data,
+			"data":    convertToProtobufCompatible(cfg.Data), // FIX: Handle TaskFieldRef
 		}
 
 	case workflow.TaskKindRun:
 		cfg := task.Config.(*workflow.RunTaskConfig)
 		configMap = map[string]interface{}{
 			"workflow": cfg.WorkflowName,
-			"input":    cfg.Input,
+			"input":    convertToProtobufCompatible(cfg.Input), // FIX: Handle TaskFieldRef
+		}
+
+	case workflow.TaskKindAgentCall:
+		cfg := task.Config.(*workflow.AgentCallTaskConfig)
+		configMap = map[string]interface{}{
+			"agent":   cfg.Agent.Slug(),
+			"message": cfg.Message,
+			"env":     stringMapToInterface(cfg.Env),
+		}
+		
+		// Add scope if specified (not empty)
+		if scope := cfg.Agent.Scope(); scope != "" {
+			configMap["scope"] = scope
+		}
+		
+		// Add execution config if present
+		if cfg.Config != nil {
+			execConfig := make(map[string]interface{})
+			if cfg.Config.Model != "" {
+				execConfig["model"] = cfg.Config.Model
+			}
+			if cfg.Config.Timeout > 0 {
+				execConfig["timeout"] = cfg.Config.Timeout
+			}
+			if cfg.Config.Temperature > 0 {
+				execConfig["temperature"] = cfg.Config.Temperature
+			}
+			if len(execConfig) > 0 {
+				configMap["config"] = execConfig
+			}
 		}
 
 	default:

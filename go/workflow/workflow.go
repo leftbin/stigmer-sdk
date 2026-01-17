@@ -481,6 +481,29 @@ func (w *Workflow) SetVars(name string, keyValuePairs ...interface{}) *Task {
 	return task
 }
 
+// CallAgent creates an agent call task and adds it to the workflow.
+//
+// This is a convenience method combining task creation and workflow registration.
+// It enables Pulumi-style fluent API for calling agents within workflows.
+//
+// Example:
+//
+//	wf := workflow.New(ctx, ...)
+//	reviewTask := wf.CallAgent(
+//	    "review",
+//	    workflow.AgentOption(workflow.AgentBySlug("code-reviewer")),
+//	    workflow.Message("Review PR: ${.input.prUrl}"),
+//	    workflow.WithEnv(map[string]string{
+//	        "GITHUB_TOKEN": "${.secrets.GITHUB_TOKEN}",
+//	    }),
+//	)
+//	reviewTask.ExportAs("reviewResult")
+func (w *Workflow) CallAgent(name string, opts ...AgentCallOption) *Task {
+	task := AgentCallTask(name, opts...)
+	w.AddTask(task)
+	return task
+}
+
 // String returns a string representation of the Workflow.
 func (w *Workflow) String() string {
 	return "Workflow(namespace=" + w.Document.Namespace + ", name=" + w.Document.Name + ", version=" + w.Document.Version + ")"

@@ -249,6 +249,28 @@ func (c *Context) GetObject(name string) *ObjectRef {
 	return nil
 }
 
+// ExportVariables exports all context variables as a map for synthesis.
+// This is used internally during workflow synthesis to pass compile-time
+// variables to the interpolation layer.
+//
+// The returned map contains variable names as keys and Ref interfaces as values.
+// The synthesis layer extracts actual values using the ToValue() method.
+//
+// Example usage (internal):
+//
+//	manifest, err := synth.ToWorkflowManifestWithContext(ctx.ExportVariables(), wf)
+func (c *Context) ExportVariables() map[string]interface{} {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Convert variables map to interface map
+	result := make(map[string]interface{}, len(c.variables))
+	for name, ref := range c.variables {
+		result[name] = ref
+	}
+	return result
+}
+
 // =============================================================================
 // Resource Registration
 // =============================================================================

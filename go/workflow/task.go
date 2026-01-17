@@ -22,6 +22,7 @@ const (
 	TaskKindCallActivity TaskKind = "CALL_ACTIVITY"
 	TaskKindRaise        TaskKind = "RAISE"
 	TaskKindRun          TaskKind = "RUN"
+	TaskKindAgentCall    TaskKind = "AGENT_CALL"
 )
 
 // Special task flow control constants.
@@ -1375,6 +1376,8 @@ func FieldRef(fieldPath string) string {
 // When mixing expressions (${ ... }) with static strings, this creates a proper
 // JQ expression using concatenation syntax.
 //
+// Accepts strings, TaskFieldRef, or any type that has Expression() method.
+//
 // Examples:
 //   - Interpolate(VarRef("apiURL"), "/data") 
 //     → ${ $context.apiURL + "/data" } ✅
@@ -1382,23 +1385,41 @@ func FieldRef(fieldPath string) string {
 //     → ${ "Bearer " + $context.token } ✅
 //   - Interpolate("https://", VarRef("domain"), "/api/v1")
 //     → ${ "https://" + $context.domain + "/api/v1" } ✅
+//   - Interpolate("Error: ", task.Field("error"))
+//     → ${ "Error: " + $context.task.error } ✅
 //
 // Special cases:
 //   - Interpolate(VarRef("url")) → ${ $context.url } (single expression, no concatenation)
 //   - Interpolate("https://api.example.com") → https://api.example.com (plain string)
-func Interpolate(parts ...string) string {
+func Interpolate(parts ...interface{}) string {
 	if len(parts) == 0 {
 		return ""
 	}
 	
+	// Convert all parts to strings
+	// Handle TaskFieldRef, strings, and other types
+	stringParts := make([]string, len(parts))
+	for i, part := range parts {
+		switch v := part.(type) {
+		case string:
+			stringParts[i] = v
+		case TaskFieldRef:
+			// Convert TaskFieldRef to its expression
+			stringParts[i] = v.Expression()
+		default:
+			// For other types, use fmt.Sprintf
+			stringParts[i] = fmt.Sprintf("%v", v)
+		}
+	}
+	
 	// Single part - return as-is
-	if len(parts) == 1 {
-		return parts[0]
+	if len(stringParts) == 1 {
+		return stringParts[0]
 	}
 	
 	// Check if any part contains an expression (starts with ${)
 	hasExpression := false
-	for _, part := range parts {
+	for _, part := range stringParts {
 		if strings.HasPrefix(part, "${") {
 			hasExpression = true
 			break
@@ -1407,12 +1428,12 @@ func Interpolate(parts ...string) string {
 	
 	// If no expressions, just concatenate as plain string
 	if !hasExpression {
-		return strings.Join(parts, "")
+		return strings.Join(stringParts, "")
 	}
 	
 	// Build expression with proper concatenation
-	exprParts := make([]string, 0, len(parts))
-	for _, part := range parts {
+	exprParts := make([]string, 0, len(stringParts))
+	for _, part := range stringParts {
 		if strings.HasPrefix(part, "${") && strings.HasSuffix(part, "}") {
 			// Extract expression content (remove ${ and })
 			// Handle both formats: "${...}" and "${ ... }" (with spaces)
