@@ -358,6 +358,266 @@ func TestExample14_AutoExportVerification(t *testing.T) {
 
 ---
 
+## 2026-01-18: Runtime Secret Resolution with JIT Placeholders
+
+### Context
+
+Implemented just-in-time (JIT) runtime secret resolution to prevent secrets from appearing in Temporal history or workflow manifests. Secrets are now resolved at activity execution time (not synthesis time) through a placeholder-based architecture.
+
+**Security Impact**: CRITICAL - Prevents secret leakage to Temporal history, manifests, and logs.
+
+### Pattern 1: Automatic Placeholder Preservation via Regex Guard
+
+**Problem**: Need to prevent synthesis interpolator from resolving runtime placeholders while still resolving compile-time variables.
+
+**Discovery**: The synthesis layer's `replaceVariablePlaceholders()` function uses regex pattern `([a-zA-Z_][a-zA-Z0-9_]*)` to match compile-time variables. This pattern **does not match** runtime placeholders because they have a dot after the opening brace.
+
+**Solution**: No code changes needed - automatic preservation!
+
+```go
+// In internal/synth/interpolator.go (UNCHANGED)
+completeValueRegex := regexp.MustCompile(`"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}"`)
+partialValueRegex := regexp.MustCompile(`\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
+
+// Results:
+"${apiKey}"              → MATCHES (resolved to actual value)
+"${.secrets.API_KEY}"    → NO MATCH (preserved as-is) ✅
+"${.env_vars.REGION}"    → NO MATCH (preserved as-is) ✅
+```
+
+**Why This Works**:
+- Regex pattern requires first character to be `[a-zA-Z_]`
+- Dot (`.`) doesn't match `[a-zA-Z_]`
+- Runtime placeholders naturally pass through unchanged
+- No special-casing or "exclude patterns" needed
+- Implicit security guarantee through validation pattern
+
+**Critical Insight**: Understanding existing validation patterns can reveal implicit guarantees. Leverage existing guards instead of adding new ones.
+
+**When to Use**: Anytime you need compile-time and runtime expression coexistence - use different syntax patterns that don't collide.
+
+### Pattern 2: Placeholder Generation Functions
+
+**Problem**: Need type-safe way to generate runtime placeholders with consistent format.
+
+**Solution**: Simple string formatting functions with validation:
+
+```go
+// In workflow/runtime_env.go
+func RuntimeSecret(keyName string) string {
+    return fmt.Sprintf("${.secrets.%s}", keyName)
+}
+
+func RuntimeEnv(varName string) string {
+    return fmt.Sprintf("${.env_vars.%s}", varName)
+}
+
+func ValidateRuntimeRef(ref string) error {
+    pattern := regexp.MustCompile(`^\$\{\.(?:secrets|env_vars)\.[A-Z_][A-Z0-9_]*\}$`)
+    if !pattern.MatchString(ref) {
+        return fmt.Errorf("invalid runtime reference format: %s", ref)
+    }
+    return nil
+}
+```
+
+**Usage**:
+```go
+// In workflow code
+wf.HttpPost("callAPI", endpoint,
+    workflow.Header("Authorization", workflow.RuntimeSecret("OPENAI_KEY")),
+    workflow.Header("X-Region", workflow.RuntimeEnv("AWS_REGION")),
+)
+
+// Generated manifest:
+// headers: {
+//   "Authorization": "${.secrets.OPENAI_KEY}",
+//   "X-Region": "${.env_vars.AWS_REGION}"
+// }
+```
+
+**Why This Works**:
+- Simple string formatting (O(1) performance)
+- Type-safe at SDK level
+- Validation catches malformed refs early
+- Consistent format guaranteed
+
+**When to Use**: Anytime you need to generate placeholder strings that should not be resolved until runtime.
+
+### Pattern 3: Combining Static and Runtime Values
+
+**Problem**: Need to combine static text with runtime placeholders (e.g., "Bearer ${.secrets.TOKEN}").
+
+**Solution**: Use existing `Interpolate()` helper with runtime placeholders:
+
+```go
+// Combine static "Bearer " with runtime secret
+authHeader := workflow.Interpolate("Bearer ", workflow.RuntimeSecret("API_KEY"))
+// Result: "${ \"Bearer \" + ${.secrets.API_KEY} }"
+
+// Wait - this creates nested ${}! Need simpler approach:
+// Actually, just use string concatenation at synthesis time:
+authHeader := "Bearer " + workflow.RuntimeSecret("API_KEY")
+// Result: "Bearer ${.secrets.API_KEY}" ✅ Correct!
+```
+
+**Correction**: Direct string concatenation works because:
+1. `RuntimeSecret()` returns a complete string `"${.secrets.KEY}"`
+2. Go's `+` operator concatenates strings
+3. Result is `"Bearer ${.secrets.KEY}"` (valid placeholder in larger string)
+
+**Gotcha**: Don't use `Interpolate()` for runtime placeholders - it's designed for JQ expressions. Simple string concatenation is clearer and works perfectly.
+
+**When to Use**: Combining static prefixes/suffixes with runtime placeholders (Authorization headers, URLs, etc.)
+
+### Pattern 4: Export Variables for Synthesis
+
+**Problem**: Synthesis layer needs access to context variables to interpolate compile-time values.
+
+**Solution**: Add `ExportVariables()` method to Context:
+
+```go
+// In stigmer/context.go
+func (c *Context) ExportVariables() map[string]interface{} {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+
+    result := make(map[string]interface{}, len(c.variables))
+    for name, ref := range c.variables {
+        result[name] = ref
+    }
+    return result
+}
+
+// Usage in synthesis
+manifest, err := synth.ToWorkflowManifestWithContext(ctx.ExportVariables(), wf)
+```
+
+**Why This Pattern**:
+- Clean separation: Context manages variables, synthesis requests them
+- Thread-safe with RLock (read-only operation)
+- Returns Ref interfaces (synthesis extracts values via ToValue())
+- No direct variable access from synthesis layer
+
+**When to Use**: Anytime synthesis needs access to context data - use export method instead of direct field access.
+
+### Pattern 5: Security Testing - Synthesis Preservation Test
+
+**Problem**: Need to verify secrets aren't resolved during synthesis (critical security test).
+
+**Solution**: Create test that verifies placeholder preservation:
+
+```go
+func TestRuntimeSecretPreservedDuringSynthesis(t *testing.T) {
+    ctx := stigmer.NewContext()
+    
+    // Add BOTH compile-time and runtime placeholders
+    apiURL := ctx.SetString("apiURL", "https://api.example.com")
+    
+    task := workflow.HttpCallTask("callAPI",
+        workflow.WithURI("${apiURL}/data"), // Compile-time: should resolve
+        workflow.Header("Authorization", workflow.RuntimeSecret("OPENAI_KEY")), // Runtime: should preserve
+    )
+    
+    // Synthesize
+    manifest, _ := synth.ToWorkflowManifestWithContext(ctx.ExportVariables(), wf)
+    
+    // Verify compile-time resolved
+    uri := manifest.Workflows[0].Spec.Tasks[0].TaskConfig.AsMap()["endpoint"].(map[string]interface{})["uri"].(string)
+    assert.Equal(t, "https://api.example.com/data", uri) // ✅ Resolved
+    
+    // CRITICAL: Verify runtime preserved
+    authHeader := manifest.Workflows[0].Spec.Tasks[0].TaskConfig.AsMap()["headers"].(map[string]interface{})["Authorization"].(string)
+    assert.Equal(t, "${.secrets.OPENAI_KEY}", authHeader) // ✅ Preserved!
+}
+```
+
+**Why This Test is Critical**:
+- Verifies security guarantee (secrets not in manifests)
+- Tests both behaviors (compile-time resolve, runtime preserve)
+- Catches regression if regex pattern changes
+- Fails loudly if secrets leak ("SECURITY FAILURE" message)
+
+**When to Use**: ALWAYS create this test for any runtime resolution feature. Security tests are not optional.
+
+### Pattern 6: Fail-Fast Error Handling for Missing Variables
+
+**Problem**: Should missing runtime variables fail immediately or fall back silently?
+
+**Decision**: Fail-fast approach with clear error messages.
+
+**Rationale**:
+```go
+// In zigflow/resolver.go
+if !exists {
+    missingVars = append(missingVars, fmt.Sprintf("%s.%s", refType, key))
+    return match // Keep placeholder for error reporting
+}
+
+// After resolution, check for errors
+if len(missingVars) > 0 {
+    return "", fmt.Errorf("failed to resolve runtime placeholders: %s", 
+        strings.Join(missingVars, ", "))
+}
+```
+
+**Benefits**:
+- Clear error messages at resolution time
+- Prevents silent failures (task executes with placeholder)
+- Easier debugging (error before task execution, not during)
+- Better security (don't execute with unresolved secrets)
+
+**Alternative Rejected**: Silent fallback (keep placeholder if missing)
+- ❌ Task would execute with placeholder string (wrong behavior)
+- ❌ Hard to debug (error occurs later in task execution)
+- ❌ Security risk (unclear if secret was provided)
+
+**When to Use**: Fail-fast is almost always better for configuration/variable resolution.
+
+### Architectural Decision: Compile-Time vs Runtime Variables
+
+**The Two Variable Systems**:
+
+Stigmer SDK now has TWO variable systems (by design):
+
+1. **Compile-Time Variables** (`ctx.SetString()`, `ctx.SetInt()`, etc.)
+   - Resolved during synthesis (baked into manifest)
+   - Use for: API URLs, retry counts, static config
+   - Security: ❌ DON'T use for secrets (they'll be in manifest)
+
+2. **Runtime Variables** (`workflow.RuntimeSecret()`, `workflow.RuntimeEnv()`)
+   - Resolved during activity execution (JIT)
+   - Use for: API keys, passwords, environment-specific values
+   - Security: ✅ Safe for secrets (never in manifest/history)
+
+**Rule of Thumb**:
+
+```go
+// ✅ CORRECT - Static config (compile-time)
+apiURL := ctx.SetString("apiURL", "https://api.example.com")
+retries := ctx.SetInt("retries", 3)
+
+// ❌ WRONG - Secrets (compile-time) - WILL LEAK!
+apiKey := ctx.SetSecret("apiKey", "sk-12345") // In manifest!
+
+// ✅ CORRECT - Secrets (runtime)
+Header("Authorization", workflow.RuntimeSecret("OPENAI_KEY")) // Placeholder only!
+```
+
+**Migration Path**:
+- Existing `ctx.SetSecret()` still works (backward compatible)
+- Gradually migrate to `workflow.RuntimeSecret()` for security
+- Use `ctx.SetSecret()` only for non-sensitive compile-time values
+- Eventually deprecate `ctx.SetSecret()` in favor of runtime approach
+
+**When to Choose**:
+- Can value be in Git? → Compile-time
+- Must value be secret? → Runtime
+- Changes per environment? → Runtime
+- Static across all environments? → Compile-time
+
+---
+
 ## Future Patterns to Document
 
 - Environment spec implementation (ctx.Env)
