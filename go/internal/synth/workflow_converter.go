@@ -229,7 +229,10 @@ func createContextInitTask(contextVars map[string]interface{}) (*workflowv1.Work
 		Name:       "__stigmer_init_context",
 		Kind:       apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_SET,
 		TaskConfig: taskConfigStruct,
-		// No export needed - this task just sets variables
+		// CRITICAL: Must export variables to make them accessible via $context.variableName
+		Export: &workflowv1.Export{
+			As: "${.}",  // Export all variables to context
+		},
 		// No flow control - tasks will execute sequentially
 	}
 
