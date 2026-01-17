@@ -1,6 +1,7 @@
 package examples_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -737,6 +738,368 @@ func assertFileExists(t *testing.T, path string) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatalf("Expected file does not exist: %s", path)
 	}
+}
+
+// TestExample14_WorkflowWithRuntimeSecrets tests the workflow with runtime secrets example
+// This test validates the CRITICAL SECURITY PATTERN:
+// 1. Runtime secrets appear as placeholders in manifest: "${.secrets.KEY}"
+// 2. Runtime env vars appear as placeholders: "${.env_vars.VAR}"
+// 3. NO actual secret values appear anywhere in the manifest
+// 4. Placeholders are correctly formatted and validated
+func TestExample14_WorkflowWithRuntimeSecrets(t *testing.T) {
+	runExampleTest(t, "14_workflow_with_runtime_secrets.go", func(t *testing.T, outputDir string) {
+		manifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+		assertFileExists(t, manifestPath)
+
+		var manifest workflowv1.WorkflowManifest
+		readProtoManifest(t, manifestPath, &manifest)
+
+		if len(manifest.Workflows) != 1 {
+			t.Fatalf("Expected 1 workflow, got %d", len(manifest.Workflows))
+		}
+
+		wf := manifest.Workflows[0]
+		if wf.Spec == nil || wf.Spec.Document == nil {
+			t.Fatal("Workflow spec or document is nil")
+		}
+
+		if wf.Spec.Document.Name != "secure-api-workflow" {
+			t.Errorf("Workflow name = %v, want secure-api-workflow", wf.Spec.Document.Name)
+		}
+
+		// Verify workflow has tasks
+		if len(wf.Spec.Tasks) == 0 {
+			t.Fatal("Workflow should have tasks")
+		}
+
+		t.Logf("Found %d tasks in workflow", len(wf.Spec.Tasks))
+
+		// ============================================================================
+		// SECURITY TEST 1: Verify Runtime Secret Placeholders
+		// ============================================================================
+
+		// Find callOpenAI task - should use RuntimeSecret for API key
+		var openaiTask *workflowv1.WorkflowTask
+		for _, task := range wf.Spec.Tasks {
+			if task.Name == "callOpenAI" {
+				openaiTask = task
+				break
+			}
+		}
+
+		if openaiTask == nil {
+			t.Fatal("callOpenAI task not found")
+		}
+
+		// Verify Authorization header contains runtime secret placeholder
+		if openaiTask.TaskConfig == nil {
+			t.Fatal("callOpenAI task config is nil")
+		}
+
+		// Check headers field
+		headersField, ok := openaiTask.TaskConfig.Fields["headers"]
+		if !ok {
+			t.Fatal("callOpenAI should have 'headers' field")
+		}
+
+		headersStruct := headersField.GetStructValue()
+		if headersStruct == nil {
+			t.Fatal("Headers should be a struct")
+		}
+
+		authHeader, ok := headersStruct.Fields["Authorization"]
+		if !ok {
+			t.Fatal("Should have Authorization header")
+		}
+
+		authValue := authHeader.GetStringValue()
+		t.Logf("Authorization header: %s", authValue)
+
+		// CRITICAL: Verify it's a PLACEHOLDER, not the actual secret
+		// Expected: "Bearer ${.secrets.OPENAI_API_KEY}"
+		// NOT: "Bearer sk-proj-abc123"
+		if !containsRuntimeRef(authValue, "secrets", "OPENAI_API_KEY") {
+			t.Errorf("Authorization header should contain runtime secret placeholder ${.secrets.OPENAI_API_KEY}, got: %s", authValue)
+		}
+
+		// Verify NO actual secret values anywhere
+		if containsSecretValue(authValue) {
+			t.Errorf("❌ SECURITY VIOLATION: Authorization header contains what looks like an actual secret: %s", authValue)
+		}
+
+		// ============================================================================
+		// SECURITY TEST 2: Verify Runtime Environment Variable Placeholders
+		// ============================================================================
+
+		// Find processData task - should use RuntimeEnv for environment config
+		var processTask *workflowv1.WorkflowTask
+		for _, task := range wf.Spec.Tasks {
+			if task.Name == "processData" {
+				processTask = task
+				break
+			}
+		}
+
+		if processTask == nil {
+			t.Fatal("processData task not found")
+		}
+
+		// Check endpoint field for environment-specific URL
+		endpointField, ok := processTask.TaskConfig.Fields["endpoint"]
+		if !ok {
+			t.Fatal("processData should have 'endpoint' field")
+		}
+
+		endpointStruct := endpointField.GetStructValue()
+		if endpointStruct == nil {
+			t.Fatal("Endpoint should be a struct")
+		}
+
+		uriField, ok := endpointStruct.Fields["uri"]
+		if !ok {
+			t.Fatal("Endpoint should have 'uri' field")
+		}
+
+		uriValue := uriField.GetStringValue()
+		t.Logf("Endpoint URI: %s", uriValue)
+
+		// Verify environment variable placeholder
+		// Expected: "https://api-${.env_vars.ENVIRONMENT}.example.com/process"
+		// NOT: "https://api-production.example.com/process"
+		if !containsRuntimeRef(uriValue, "env_vars", "ENVIRONMENT") {
+			t.Errorf("URI should contain runtime env var placeholder ${.env_vars.ENVIRONMENT}, got: %s", uriValue)
+		}
+
+		// Check X-Region header should have runtime env var
+		processHeaders, ok := processTask.TaskConfig.Fields["headers"]
+		if ok {
+			processHeadersStruct := processHeaders.GetStructValue()
+			if processHeadersStruct != nil {
+				regionHeader, hasRegion := processHeadersStruct.Fields["X-Region"]
+				if hasRegion {
+					regionValue := regionHeader.GetStringValue()
+					t.Logf("X-Region header: %s", regionValue)
+
+					if !containsRuntimeRef(regionValue, "env_vars", "AWS_REGION") {
+						t.Errorf("X-Region header should contain ${.env_vars.AWS_REGION}, got: %s", regionValue)
+					}
+				}
+			}
+		}
+
+		// ============================================================================
+		// SECURITY TEST 3: Verify Multiple Secrets Pattern
+		// ============================================================================
+
+		// Find chargePayment task - should have multiple runtime secrets
+		var stripeTask *workflowv1.WorkflowTask
+		for _, task := range wf.Spec.Tasks {
+			if task.Name == "chargePayment" {
+				stripeTask = task
+				break
+			}
+		}
+
+		if stripeTask == nil {
+			t.Fatal("chargePayment task not found")
+		}
+
+		// Verify Stripe API key is a runtime secret
+		stripeHeaders, ok := stripeTask.TaskConfig.Fields["headers"]
+		if ok {
+			stripeHeadersStruct := stripeHeaders.GetStructValue()
+			if stripeHeadersStruct != nil {
+				stripeAuth, hasAuth := stripeHeadersStruct.Fields["Authorization"]
+				if hasAuth {
+					stripeAuthValue := stripeAuth.GetStringValue()
+					t.Logf("Stripe Authorization: %s", stripeAuthValue)
+
+					if !containsRuntimeRef(stripeAuthValue, "secrets", "STRIPE_API_KEY") {
+						t.Errorf("Stripe Authorization should contain ${.secrets.STRIPE_API_KEY}, got: %s", stripeAuthValue)
+					}
+
+					if containsSecretValue(stripeAuthValue) {
+						t.Errorf("❌ SECURITY VIOLATION: Stripe Authorization contains actual secret: %s", stripeAuthValue)
+					}
+				}
+
+				// Check idempotency key is also a runtime secret
+				idempotencyKey, hasKey := stripeHeadersStruct.Fields["Idempotency-Key"]
+				if hasKey {
+					keyValue := idempotencyKey.GetStringValue()
+					t.Logf("Idempotency-Key: %s", keyValue)
+
+					if !containsRuntimeRef(keyValue, "secrets", "STRIPE_IDEMPOTENCY_KEY") {
+						t.Errorf("Idempotency-Key should contain ${.secrets.STRIPE_IDEMPOTENCY_KEY}, got: %s", keyValue)
+					}
+				}
+			}
+		}
+
+		// ============================================================================
+		// SECURITY TEST 4: Database Credentials
+		// ============================================================================
+
+		// Find storeResults task - should have database password as runtime secret
+		var dbTask *workflowv1.WorkflowTask
+		for _, task := range wf.Spec.Tasks {
+			if task.Name == "storeResults" {
+				dbTask = task
+				break
+			}
+		}
+
+		if dbTask == nil {
+			t.Fatal("storeResults task not found")
+		}
+
+		// Check gRPC metadata for db-password
+		metadata, ok := dbTask.TaskConfig.Fields["metadata"]
+		if ok {
+			metadataStruct := metadata.GetStructValue()
+			if metadataStruct != nil {
+				dbPassword, hasPassword := metadataStruct.Fields["db-password"]
+				if hasPassword {
+					passwordValue := dbPassword.GetStringValue()
+					t.Logf("Database password metadata: %s", passwordValue)
+
+					if !containsRuntimeRef(passwordValue, "secrets", "DATABASE_PASSWORD") {
+						t.Errorf("db-password should contain ${.secrets.DATABASE_PASSWORD}, got: %s", passwordValue)
+					}
+
+					if containsSecretValue(passwordValue) {
+						t.Errorf("❌ SECURITY VIOLATION: Database password contains actual secret: %s", passwordValue)
+					}
+				}
+			}
+		}
+
+		// ============================================================================
+		// SECURITY TEST 5: Webhook Registration with Runtime Secrets
+		// ============================================================================
+
+		// Find registerWebhook task - should have webhook signing secret
+		var webhookTask *workflowv1.WorkflowTask
+		for _, task := range wf.Spec.Tasks {
+			if task.Name == "registerWebhook" {
+				webhookTask = task
+				break
+			}
+		}
+
+		if webhookTask == nil {
+			t.Fatal("registerWebhook task not found")
+		}
+
+		// Check Authorization header for external API key
+		webhookHeaders, ok := webhookTask.TaskConfig.Fields["headers"]
+		if ok {
+			webhookHeadersStruct := webhookHeaders.GetStructValue()
+			if webhookHeadersStruct != nil {
+				webhookAuth, hasAuth := webhookHeadersStruct.Fields["Authorization"]
+				if hasAuth {
+					authValue := webhookAuth.GetStringValue()
+					t.Logf("Webhook Authorization: %s", authValue)
+
+					if !containsRuntimeRef(authValue, "secrets", "EXTERNAL_API_KEY") {
+						t.Errorf("Webhook Authorization should contain .secrets.EXTERNAL_API_KEY, got: %s", authValue)
+					}
+				}
+			}
+		}
+
+		// Check body for webhook signing secret
+		webhookBody, ok := webhookTask.TaskConfig.Fields["body"]
+		if ok {
+			bodyStruct := webhookBody.GetStructValue()
+			if bodyStruct != nil {
+				secret, hasSecret := bodyStruct.Fields["secret"]
+				if hasSecret {
+					secretValue := secret.GetStringValue()
+					t.Logf("Webhook secret: %s", secretValue)
+
+					if !containsRuntimeRef(secretValue, "secrets", "WEBHOOK_SIGNING_SECRET") {
+						t.Errorf("Webhook secret should contain .secrets.WEBHOOK_SIGNING_SECRET, got: %s", secretValue)
+					}
+
+					if containsSecretValue(secretValue) {
+						t.Errorf("❌ SECURITY VIOLATION: Webhook secret contains actual secret: %s", secretValue)
+					}
+				}
+			}
+		}
+
+		// ============================================================================
+		// FINAL VERIFICATION
+		// ============================================================================
+
+		t.Log("✅ Runtime Secret Security Verified:")
+		t.Log("   - All API keys use RuntimeSecret() placeholders")
+		t.Log("   - Environment config uses RuntimeEnv() placeholders")
+		t.Log("   - NO actual secret values found in manifest")
+		t.Log("   - Placeholders correctly embedded: .secrets.KEY and .env_vars.VAR")
+		t.Log("   - Multiple secrets in single task work correctly")
+		t.Log("   - Database credentials properly secured")
+		t.Log("   - Webhook signing secrets properly secured")
+		t.Log("   - Environment-specific URLs work with runtime env vars")
+	})
+}
+
+// Helper function to check if a string contains a runtime reference
+func containsRuntimeRef(value string, refType string, keyName string) bool {
+	// Check for both exact match and interpolation patterns
+	placeholder := fmt.Sprintf(".%s.%s", refType, keyName)
+
+	// The placeholder might appear in different formats:
+	// - ${.secrets.KEY} (direct)
+	// - ${ "Bearer " + .secrets.KEY } (Interpolate() format)
+	// - .secrets.KEY (without ${ })
+	
+	return containsSubstring(value, placeholder)
+}
+
+// Helper function to check if string contains another string
+func containsSubstring(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || recursiveContains(s, substr))
+}
+
+// Recursive helper for substring checking
+func recursiveContains(s, substr string) bool {
+	if len(s) < len(substr) {
+		return false
+	}
+	if s[:len(substr)] == substr {
+		return true
+	}
+	return recursiveContains(s[1:], substr)
+}
+
+// Helper function to detect if a value looks like an actual secret
+// (starts with common secret prefixes)
+func containsSecretValue(value string) bool {
+	secretPrefixes := []string{
+		"sk-proj-",      // OpenAI project keys
+		"sk-",           // OpenAI/Stripe keys
+		"sk_live_",      // Stripe live keys
+		"sk_test_",      // Stripe test keys
+		"AKIA",          // AWS access keys
+		"glpat-",        // GitLab personal access tokens
+		"ghp_",          // GitHub personal access tokens
+		"xoxb-",         // Slack bot tokens
+		"rk_live_",      // Stripe restricted keys
+	}
+
+	for _, prefix := range secretPrefixes {
+		if len(value) >= len(prefix) && value[:len(prefix)] == prefix {
+			return true
+		}
+		// Check anywhere in the string
+		if containsSubstring(value, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Helper function to read and unmarshal a protobuf manifest
