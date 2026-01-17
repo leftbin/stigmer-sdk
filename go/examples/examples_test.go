@@ -445,6 +445,169 @@ func TestExample13_WorkflowAndAgentSharedContext(t *testing.T) {
 	})
 }
 
+// TestExample14_AutoExportVerification tests the auto-export verification example
+func TestExample14_AutoExportVerification(t *testing.T) {
+	runExampleTest(t, "14_auto_export_verification.go", func(t *testing.T, outputDir string) {
+		manifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+		assertFileExists(t, manifestPath)
+
+		var manifest workflowv1.WorkflowManifest
+		readProtoManifest(t, manifestPath, &manifest)
+
+		if len(manifest.Workflows) != 1 {
+			t.Fatalf("Expected 1 workflow, got %d", len(manifest.Workflows))
+		}
+
+		workflow := manifest.Workflows[0]
+		if workflow.Spec == nil || workflow.Spec.Document == nil {
+			t.Fatal("Workflow spec or document is nil")
+		}
+
+		if workflow.Spec.Document.Name != "auto-export-demo" {
+			t.Errorf("Workflow name = %v, want auto-export-demo", workflow.Spec.Document.Name)
+		}
+
+		// Verify workflow has tasks
+		if len(workflow.Spec.Tasks) == 0 {
+			t.Error("Workflow should have tasks")
+		}
+
+		// Find fetchData task and verify it has export set
+		var fetchDataTask *workflowv1.WorkflowTask
+		for _, task := range workflow.Spec.Tasks {
+			if task.Name == "fetchData" {
+				fetchDataTask = task
+				break
+			}
+		}
+
+		if fetchDataTask == nil {
+			t.Fatal("fetchData task not found")
+		}
+
+		// Verify auto-export is set
+		if fetchDataTask.Export == nil {
+			t.Error("fetchData task should have export (auto-export feature)")
+		} else if fetchDataTask.Export.As != "${.}" {
+			t.Errorf("fetchData export.as = %v, want ${.}", fetchDataTask.Export.As)
+		}
+
+		// Verify context init task exists and has export
+		var contextInitTask *workflowv1.WorkflowTask
+		for _, task := range workflow.Spec.Tasks {
+			if task.Name == "__stigmer_init_context" {
+				contextInitTask = task
+				break
+			}
+		}
+
+		if contextInitTask == nil {
+			t.Fatal("__stigmer_init_context task not found")
+		}
+
+		// Verify context init task has export (Task 1 fix)
+		if contextInitTask.Export == nil {
+			t.Error("__stigmer_init_context should have export")
+		} else if contextInitTask.Export.As != "${.}" {
+			t.Errorf("__stigmer_init_context export.as = %v, want ${.}", contextInitTask.Export.As)
+		}
+
+		t.Log("✅ Auto-export verification: Both Task 1 and Task 2 fixes confirmed!")
+	})
+}
+
+// TestExample15_AutoExportBeforeAfter tests the auto-export before/after comparison example
+func TestExample15_AutoExportBeforeAfter(t *testing.T) {
+	runExampleTest(t, "15_auto_export_before_after.go", func(t *testing.T, outputDir string) {
+		manifestPath := filepath.Join(outputDir, "workflow-manifest.pb")
+		assertFileExists(t, manifestPath)
+
+		var manifest workflowv1.WorkflowManifest
+		readProtoManifest(t, manifestPath, &manifest)
+
+		if len(manifest.Workflows) != 1 {
+			t.Fatalf("Expected 1 workflow, got %d", len(manifest.Workflows))
+		}
+
+		workflow := manifest.Workflows[0]
+		if workflow.Spec == nil || workflow.Spec.Document == nil {
+			t.Fatal("Workflow spec or document is nil")
+		}
+
+		if workflow.Spec.Document.Name != "auto-export-demo" {
+			t.Errorf("Workflow name = %v, want auto-export-demo", workflow.Spec.Document.Name)
+		}
+
+		// Verify workflow has tasks
+		if len(workflow.Spec.Tasks) == 0 {
+			t.Error("Workflow should have tasks")
+		}
+
+		// Find fetchData task and verify auto-export
+		var fetchDataTask *workflowv1.WorkflowTask
+		for _, task := range workflow.Spec.Tasks {
+			if task.Name == "fetchData" {
+				fetchDataTask = task
+				break
+			}
+		}
+
+		if fetchDataTask == nil {
+			t.Fatal("fetchData task not found")
+		}
+
+		// Verify auto-export is set (demonstrates Task 2 fix)
+		if fetchDataTask.Export == nil {
+			t.Error("fetchData task should have auto-export")
+		} else if fetchDataTask.Export.As != "${.}" {
+			t.Errorf("fetchData export.as = %v, want ${.}", fetchDataTask.Export.As)
+		}
+
+		// Find processData task and verify implicit dependencies
+		var processDataTask *workflowv1.WorkflowTask
+		for _, task := range workflow.Spec.Tasks {
+			if task.Name == "processData" {
+				processDataTask = task
+				break
+			}
+		}
+
+		if processDataTask == nil {
+			t.Fatal("processData task not found")
+		}
+
+		// Verify processData has variables that reference fetchData fields
+		if processDataTask.TaskConfig == nil {
+			t.Fatal("processData task config is nil")
+		}
+
+		varsField, ok := processDataTask.TaskConfig.Fields["variables"]
+		if !ok {
+			t.Fatal("processData should have 'variables' field")
+		}
+
+		varsStruct := varsField.GetStructValue()
+		if varsStruct == nil {
+			t.Fatal("Variables should be a struct")
+		}
+
+		// Verify field references are correct
+		expectedVars := []string{"postTitle", "postBody", "postUserId", "organization"}
+		for _, varName := range expectedVars {
+			if _, ok := varsStruct.Fields[varName]; !ok {
+				t.Errorf("Expected variable %s not found in processData task", varName)
+			}
+		}
+
+		// Verify title reference contains correct expression
+		if titleRef := varsStruct.Fields["postTitle"].GetStringValue(); titleRef != "${ $context.fetchData.title }" {
+			t.Errorf("postTitle reference = %v, want ${ $context.fetchData.title }", titleRef)
+		}
+
+		t.Log("✅ Auto-export before/after: UX improvement verified!")
+	})
+}
+
 // TestContextVariables tests the context variables example with automatic SET task injection
 func TestContextVariables(t *testing.T) {
 	runExampleTest(t, "context-variables/main.go", func(t *testing.T, outputDir string) {

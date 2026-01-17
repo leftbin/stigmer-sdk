@@ -108,11 +108,16 @@ func (r TaskFieldRef) FieldName() string {
 // Field creates a typed reference to an output field of this task.
 // This enables Pulumi-style output references with clear origins.
 //
+// **IMPORTANT: Auto-Export Behavior**
+// Calling Field() automatically marks this task for export (sets ExportAs = "${.}").
+// This matches Pulumi's pattern: accessing a task's output implies it should be exported.
+// You don't need to manually call .ExportAll() - it happens automatically!
+//
 // Example:
 //
 //	fetchTask := wf.HttpGet("fetch", endpoint)
-//	title := fetchTask.Field("title")  // Clear: from fetchTask
-//	body := fetchTask.Field("body")    // Clear: from fetchTask
+//	title := fetchTask.Field("title")  // ✅ Auto-exports fetchTask!
+//	body := fetchTask.Field("body")    // ✅ Already exported, no-op
 //
 //	processTask := wf.SetVars("process",
 //	    "postTitle", title,
@@ -125,6 +130,15 @@ func (r TaskFieldRef) FieldName() string {
 //	workflow.FieldRef("title")  // ❌ Magic string - where's it from?
 //	fetchTask.Field("title")    // ✅ Clear origin!
 func (t *Task) Field(fieldName string) TaskFieldRef {
+	// Auto-export: When a task's field is referenced, automatically export the task
+	// This matches Pulumi's implicit dependency pattern where accessing an output
+	// automatically makes it available in the workflow context.
+	//
+	// Only set export if not already set (avoid overwriting custom export configs)
+	if t.ExportAs == "" {
+		t.ExportAs = "${.}"
+	}
+	
 	return TaskFieldRef{
 		taskName:  t.Name,
 		fieldName: fieldName,
