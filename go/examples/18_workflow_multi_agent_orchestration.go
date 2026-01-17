@@ -237,8 +237,8 @@ Return JSON: {"status": "healthy|degraded|failed", "metrics": {...}, "action": "
 			workflow.RuntimeEnv("DEPLOYMENT_API_URL"),
 			workflow.Header("Authorization", workflow.Interpolate("Bearer ", workflow.RuntimeSecret("DEPLOY_API_TOKEN"))),
 			workflow.WithBody(map[string]any{
-				"pr_number": workflow.RuntimeEnv("PR_NUMBER").Expression(),
-				"plan":      deploymentPlan.Field("plan").Expression(),
+				"pr_number":   workflow.RuntimeEnv("PR_NUMBER").Expression(),
+				"plan":        deploymentPlan.Field("plan").Expression(),
 				"environment": workflow.RuntimeEnv("DEPLOY_ENV").Expression(),
 			}),
 		)
