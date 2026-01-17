@@ -151,4 +151,3 @@ func TestExportField_NotOverriddenByField(t *testing.T) {
 		t.Errorf("Expected custom export %s to be preserved, got: %s", customExport, task.ExportAs)
 	}
 }
-

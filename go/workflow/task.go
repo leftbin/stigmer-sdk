@@ -22,6 +22,7 @@ const (
 	TaskKindCallActivity TaskKind = "CALL_ACTIVITY"
 	TaskKindRaise        TaskKind = "RAISE"
 	TaskKindRun          TaskKind = "RUN"
+	TaskKindAgentCall    TaskKind = "AGENT_CALL"
 )
 
 // Special task flow control constants.

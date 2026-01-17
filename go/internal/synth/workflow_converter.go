@@ -266,9 +266,10 @@ func taskKindToProtoKind(kind workflow.TaskKind) apiresource.WorkflowTaskKind {
 		workflow.TaskKindFork:         apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_FORK,
 		workflow.TaskKindTry:          apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_TRY,
 		workflow.TaskKindListen:       apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_LISTEN,
-		workflow.TaskKindWait:         apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_WAIT,
-		workflow.TaskKindRaise:        apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RAISE,
-		workflow.TaskKindRun:          apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RUN,
+		workflow.TaskKindWait:      apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_WAIT,
+		workflow.TaskKindRaise:     apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RAISE,
+		workflow.TaskKindRun:       apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_RUN,
+		workflow.TaskKindAgentCall: apiresource.WorkflowTaskKind_WORKFLOW_TASK_KIND_AGENT_CALL,
 	}
 	return kindMap[kind]
 }
@@ -544,6 +545,36 @@ func taskConfigToStruct(task *workflow.Task) (*structpb.Struct, error) {
 		configMap = map[string]interface{}{
 			"workflow": cfg.WorkflowName,
 			"input":    cfg.Input,
+		}
+
+	case workflow.TaskKindAgentCall:
+		cfg := task.Config.(*workflow.AgentCallTaskConfig)
+		configMap = map[string]interface{}{
+			"agent":   cfg.Agent.Slug(),
+			"message": cfg.Message,
+			"env":     stringMapToInterface(cfg.Env),
+		}
+		
+		// Add scope if specified (not empty)
+		if scope := cfg.Agent.Scope(); scope != "" {
+			configMap["scope"] = scope
+		}
+		
+		// Add execution config if present
+		if cfg.Config != nil {
+			execConfig := make(map[string]interface{})
+			if cfg.Config.Model != "" {
+				execConfig["model"] = cfg.Config.Model
+			}
+			if cfg.Config.Timeout > 0 {
+				execConfig["timeout"] = cfg.Config.Timeout
+			}
+			if cfg.Config.Temperature > 0 {
+				execConfig["temperature"] = cfg.Config.Temperature
+			}
+			if len(execConfig) > 0 {
+				configMap["config"] = execConfig
+			}
 		}
 
 	default:
